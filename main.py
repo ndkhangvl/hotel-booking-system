@@ -1,15 +1,32 @@
 from fastapi import FastAPI
-from app.api.routes.health import router as health_router
-from app.db.mongo import connect_mongo, close_mongo
+from app.db.cockroach import test_cockroach_connection, create_all_tables, create_database_if_not_exists, seed_basic_hotel_data
+from app.api import user
 
 app = FastAPI(title="FastAPI + CockroachDB + MongoDB")
 
 @app.on_event("startup")
 async def on_startup():
-    await connect_mongo()
+    print("⏳ Đang kiểm tra kết nối CockroachDB...")
+    test_cockroach_connection()
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    await close_mongo()
+@app.post("/initialize-db")
+async def initialize_db():
+    """
+    Tạo toàn bộ các bảng dữ liệu cần thiết trong CockroachDB.
+    """
+    create_all_tables()
+    return {"status": "success", "message": "Tạo toàn bộ database thành công"}
 
-app.include_router(health_router, prefix="/health", tags=["health"])
+@app.get("/check-db")
+async def check_db():
+    test_cockroach_connection()
+
+@app.get("/create-db")
+async def create_db():
+    create_database_if_not_exists()
+
+@app.get("/seed-db")
+async def seed_db():
+    seed_basic_hotel_data()
+
+app.include_router(user.router)

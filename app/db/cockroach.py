@@ -1,17 +1,382 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from app.core.config import settings
+import psycopg
 
-engine = create_engine(
-    settings.COCKROACH_URL,
-    pool_pre_ping=True,
-)
+DB_HOST = "100.120.9.31"
+DB_PORT = 26257
+DB_USER = "root"
+DB_NAME = "hotel_booking"
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+DEFAULT_DB_URL = f"postgresql://{DB_USER}@{DB_HOST}:{DB_PORT}/defaultdb?sslmode=disable"
+TARGET_DB_URL = f"postgresql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=disable"
 
-def get_crdb_session():
-    db = SessionLocal()
+
+def get_default_connection():
+    return psycopg.connect(DEFAULT_DB_URL)
+
+
+def get_connection():
+    return psycopg.connect(TARGET_DB_URL)
+
+
+def test_cockroach_connection():
     try:
-        yield db
-    finally:
-        db.close()
+        with get_default_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT now();")
+                result = cur.fetchone()
+                print("✅ Kết nối CockroachDB thành công:", result)
+    except Exception as e:
+        print("❌ Lỗi kết nối CockroachDB:", e)
+
+
+def create_database_if_not_exists():
+    try:
+        with get_default_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME};")
+                conn.commit()
+                print(f"✅ Tạo database '{DB_NAME}' thành công hoặc đã tồn tại")
+    except Exception as e:
+        print("❌ Lỗi tạo database:", e)
+
+
+def create_all_tables():
+    tables = [
+        ("users", """
+        CREATE TABLE IF NOT EXISTS users (
+            user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name VARCHAR(100) NOT NULL,
+            email VARCHAR(150) UNIQUE NOT NULL,
+            phone VARCHAR(15),
+            password VARCHAR(255) NOT NULL,
+            role VARCHAR(20) NOT NULL CHECK (role IN ('Guest', 'Customer', 'Receptionist', 'Admin')),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0
+        );
+        """),
+
+        ("branches", """
+        CREATE TABLE IF NOT EXISTS branches (
+            branch_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name VARCHAR(100) NOT NULL,
+            address VARCHAR(255) NOT NULL,
+            phone VARCHAR(15),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0
+        );
+        """),
+
+        ("room_types", """
+        CREATE TABLE IF NOT EXISTS room_types (
+            room_type_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name VARCHAR(50) NOT NULL,
+            description TEXT,
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0
+        );
+        """),
+
+        ("amenities", """
+        CREATE TABLE IF NOT EXISTS amenities (
+            amenity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name VARCHAR(100) NOT NULL,
+            icon_url VARCHAR(255),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0
+        );
+        """),
+
+        ("rooms", """
+        CREATE TABLE IF NOT EXISTS rooms (
+            room_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id UUID NOT NULL,
+            room_type_id UUID NOT NULL,
+            room_number VARCHAR(20) NOT NULL,
+            price DECIMAL(10, 2) NOT NULL,
+            people_number INT NOT NULL,
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0,
+
+            CONSTRAINT fk_rooms_branch
+                FOREIGN KEY (branch_id) REFERENCES branches(branch_id),
+            CONSTRAINT fk_rooms_room_type
+                FOREIGN KEY (room_type_id) REFERENCES room_types(room_type_id)
+        );
+        """),
+
+        ("vouchers", """
+        CREATE TABLE IF NOT EXISTS vouchers (
+            voucher_code VARCHAR(20) PRIMARY KEY,
+            discount_value DECIMAL(10, 2) NOT NULL,
+            valid_from TIMESTAMP NOT NULL,
+            valid_to TIMESTAMP NOT NULL,
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0
+        );
+        """),
+
+        ("bookings", """
+        CREATE TABLE IF NOT EXISTS bookings (
+            booking_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL,
+            room_id UUID NOT NULL,
+            voucher_code VARCHAR(20),
+            from_date DATE NOT NULL,
+            to_date DATE NOT NULL,
+            total_price DECIMAL(10, 2) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'Pending',
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0,
+
+            CONSTRAINT fk_bookings_user
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+            CONSTRAINT fk_bookings_room
+                FOREIGN KEY (room_id) REFERENCES rooms(room_id),
+            CONSTRAINT fk_bookings_voucher
+                FOREIGN KEY (voucher_code) REFERENCES vouchers(voucher_code),
+            CONSTRAINT chk_booking_dates
+                CHECK (to_date > from_date)
+        );
+        """),
+
+        ("room_amenities", """
+        CREATE TABLE IF NOT EXISTS room_amenities (
+            room_id UUID NOT NULL,
+            amenity_id UUID NOT NULL,
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0,
+
+            PRIMARY KEY (room_id, amenity_id),
+            CONSTRAINT fk_room_amenities_room
+                FOREIGN KEY (room_id) REFERENCES rooms(room_id),
+            CONSTRAINT fk_room_amenities_amenity
+                FOREIGN KEY (amenity_id) REFERENCES amenities(amenity_id)
+        );
+        """),
+
+        ("reviews", """
+        CREATE TABLE IF NOT EXISTS reviews (
+            review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            booking_id UUID NOT NULL,
+            rating INT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+            comment TEXT,
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0,
+
+            CONSTRAINT fk_reviews_booking
+                FOREIGN KEY (booking_id) REFERENCES bookings(booking_id)
+        );
+        """),
+
+        ("payments", """
+        CREATE TABLE IF NOT EXISTS payments (
+            payment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            booking_id UUID NOT NULL,
+            amount DECIMAL(10, 2) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'Pending',
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0,
+
+            CONSTRAINT fk_payments_booking
+                FOREIGN KEY (booking_id) REFERENCES bookings(booking_id)
+        );
+        """)
+    ]
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                for table_name, ddl in tables:
+                    cur.execute(ddl)
+                    print(f"✅ Tạo bảng {table_name} thành công")
+            conn.commit()
+        print("🎉 Tạo toàn bộ bảng thành công")
+    except Exception as e:
+        print("❌ Lỗi tạo bảng:", e)
+
+def seed_basic_hotel_data():
+    sql_statements = [
+        """INSERT INTO branches (
+            branch_id, name, address, phone,
+            created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
+        ) VALUES
+        ('a1000000-0000-0000-0000-000000000001', 'Aurora Vĩnh Long', '12 Nguyễn Huệ, Phường 1, TP. Vĩnh Long, Vĩnh Long', '02703881111', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('a1000000-0000-0000-0000-000000000002', 'Aurora An Giang', '88 Trần Hưng Đạo, TP. Châu Đốc, An Giang', '02963882222', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('a1000000-0000-0000-0000-000000000003', 'Aurora Cần Thơ', '25 Hai Bà Trưng, Quận Ninh Kiều, Cần Thơ', '02923883333', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('a1000000-0000-0000-0000-000000000004', 'Aurora Sóc Trăng', '40 Phú Lợi, TP. Sóc Trăng, Sóc Trăng', '02993884444', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('a1000000-0000-0000-0000-000000000005', 'Aurora Bạc Liêu', '18 Hòa Bình, TP. Bạc Liêu, Bạc Liêu', '02913885555', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('a1000000-0000-0000-0000-000000000006', 'Aurora Cà Mau', '66 Phan Ngọc Hiển, TP. Cà Mau, Cà Mau', '02903886666', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('a1000000-0000-0000-0000-000000000007', 'Aurora Trà Vinh', '09 Điện Biên Phủ, TP. Trà Vinh, Trà Vinh', '02943887777', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);""",
+
+        """INSERT INTO room_types (
+            room_type_id, name, description,
+            created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
+        ) VALUES
+        ('b2000000-0000-0000-0000-000000000001', 'Phòng Tiêu chuẩn', 'Phòng cơ bản dành cho 2 khách, đầy đủ tiện nghi thiết yếu.', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('b2000000-0000-0000-0000-000000000002', 'Phòng Cao cấp', 'Phòng rộng rãi hơn, nội thất hiện đại, phù hợp cho cặp đôi.', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('b2000000-0000-0000-0000-000000000003', 'Phòng Deluxe', 'Phòng có cửa sổ lớn, không gian thoáng, phù hợp nghỉ dưỡng.', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('b2000000-0000-0000-0000-000000000004', 'Phòng Gia đình', 'Phòng lớn dành cho 3-4 khách, phù hợp gia đình nhỏ.', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('b2000000-0000-0000-0000-000000000005', 'Phòng Suite', 'Phòng hạng sang, có khu tiếp khách riêng và tiện nghi cao cấp.', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);""",
+
+        """INSERT INTO amenities (
+            amenity_id, name, icon_url,
+            created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
+        ) VALUES
+        ('c3000000-0000-0000-0000-000000000001', 'Wifi miễn phí', '/icons/wifi.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000002', 'Máy lạnh', '/icons/ac.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000003', 'TV màn hình phẳng', '/icons/tv.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000004', 'Minibar', '/icons/minibar.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000005', 'Máy sấy tóc', '/icons/hairdryer.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000006', 'Bồn tắm', '/icons/bathtub.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000007', 'Ban công', '/icons/balcony.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000008', 'Ăn sáng miễn phí', '/icons/breakfast.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000009', 'Hồ bơi', '/icons/pool.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('c3000000-0000-0000-0000-000000000010', 'Phòng tập gym', '/icons/gym.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);""",
+
+        """INSERT INTO rooms (
+            room_id, branch_id, room_type_id, room_number, price, people_number,
+            created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
+        ) VALUES
+        -- Aurora Vĩnh Long
+        ('d4000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000001', '101', 450000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000001', '102', 450000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000002', '103', 600000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000004', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000002', '104', 600000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000005', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000002', '105', 620000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000006', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000003', '201', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000007', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000003', '202', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000008', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000004', '203', 900000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000009', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000004', '204', 900000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000010', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000005', '301', 1300000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+
+        -- Aurora An Giang
+        ('d4000000-0000-0000-0000-000000000011', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000001', '101', 480000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000012', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000001', '102', 480000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000013', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000002', '103', 630000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000014', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000002', '104', 630000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000015', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000002', '105', 650000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000016', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000003', '201', 800000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000017', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000003', '202', 800000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000018', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000004', '203', 980000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000019', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000004', '204', 980000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000020', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000005', '301', 1450000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+
+        -- Aurora Cần Thơ
+        ('d4000000-0000-0000-0000-000000000021', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000001', '101', 550000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000022', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000001', '102', 550000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000023', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000002', '103', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000024', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000002', '104', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000025', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000002', '105', 780000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000026', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000003', '201', 950000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000027', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000003', '202', 950000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000028', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000004', '203', 1200000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000029', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000004', '204', 1200000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000030', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000005', '301', 1800000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+
+        -- Aurora Sóc Trăng
+        ('d4000000-0000-0000-0000-000000000031', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000001', '101', 460000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000032', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000001', '102', 460000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000033', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000002', '103', 620000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000034', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000002', '104', 620000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000035', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000002', '105', 640000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000036', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000003', '201', 780000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000037', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000003', '202', 780000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000038', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000004', '203', 950000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000039', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000004', '204', 950000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000040', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000005', '301', 1380000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+
+        -- Aurora Bạc Liêu
+        ('d4000000-0000-0000-0000-000000000041', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000001', '101', 470000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000042', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000001', '102', 470000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000043', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000002', '103', 640000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000044', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000002', '104', 640000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000045', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000002', '105', 660000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000046', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000003', '201', 820000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000047', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000003', '202', 820000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000048', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000004', '203', 1000000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000049', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000004', '204', 1000000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000050', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000005', '301', 1420000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+
+        -- Aurora Cà Mau
+        ('d4000000-0000-0000-0000-000000000051', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000001', '101', 490000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000052', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000001', '102', 490000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000053', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000002', '103', 660000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000054', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000002', '104', 660000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000055', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000002', '105', 680000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000056', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000003', '201', 840000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000057', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000003', '202', 840000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000058', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000004', '203', 1020000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000059', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000004', '204', 1020000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000060', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000005', '301', 1480000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+
+        -- Aurora Trà Vinh
+        ('d4000000-0000-0000-0000-000000000061', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000001', '101', 455000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000062', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000001', '102', 455000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000063', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000002', '103', 615000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000064', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000002', '104', 615000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000065', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000002', '105', 635000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000066', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000003', '201', 770000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000067', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000003', '202', 770000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000068', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000004', '203', 940000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000069', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000004', '204', 940000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('d4000000-0000-0000-0000-000000000070', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000005', '301', 1360000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);"""
+    ]
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                for sql in sql_statements:
+                    cur.execute(sql)
+            conn.commit()
+        print("✅ Seed dữ liệu Aurora thành công")
+    except Exception as e:
+        print("❌ Lỗi seed dữ liệu:", e)
