@@ -39,3 +39,8 @@ class BranchPaginationResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+class BranchInitializeResponse(BaseModel):
+    total_branches: int
+    active_branches: int
+    total_rooms: int

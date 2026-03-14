@@ -1,13 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List
 from uuid import UUID
-from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchResponse, BranchPaginationResponse
+from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchResponse, BranchPaginationResponse, BranchInitializeResponse
 from app.crud import branch as crud_branch
 
 router = APIRouter(prefix="/admin/branches", tags=["Admin - Branches"])
 routerForUser = APIRouter(prefix="/user/branches", tags=["User - Branches"])
 
-@router.get("/initialize", response_model=BranchResponse)
+@router.get("/initialize", response_model=BranchInitializeResponse)
 async def initialize():
     """
     Trả về thống kê tổng quan cho trang quản lý chi nhánh:

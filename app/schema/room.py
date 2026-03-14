@@ -1,54 +1,64 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
-from datetime import date, time
-from decimal import Decimal
+from pydantic import BaseModel
 from uuid import UUID
+from typing import Optional, List
+from decimal import Decimal
+from datetime import date
 
-class RoomBase(BaseModel):
-    branch_id: UUID
-    room_type_id: UUID
-    room_number: str = Field(..., max_length=20)
-    price: Decimal
-    people_number: int
 
-class RoomCreate(RoomBase):
-    # Thường khi tạo mới, ta có thể truyền user ID tạo
-    created_user: Optional[UUID] = None
-
-class RoomUpdate(BaseModel):
-    # Các trường có thể cập nhật
-    room_type_id: Optional[UUID] = None
-    room_number: Optional[str] = None
-    price: Optional[Decimal] = None
-    people_number: Optional[int] = None
-    updated_user: Optional[UUID] = None
-    del_flg: Optional[int] = None
-
-class RoomResponse(RoomBase):
-    room_id: UUID
-    created_date: Optional[date]
-    created_time: Optional[time]
-    created_user: Optional[UUID]
-    updated_date: Optional[date]
-    updated_time: Optional[time]
-    updated_user: Optional[UUID]
-    del_flg: int
+class AmenityResponse(BaseModel):
+    amenity_id: UUID
+    name: str
+    icon_url: Optional[str] = None
 
     class Config:
         from_attributes = True
 
-class RoomResponseWithTypeName(BaseModel):
+
+class RoomResponse(BaseModel):
     room_id: UUID
+    branch_id: UUID
+    room_type_id: Optional[UUID] = None
+    room_type_name: Optional[str] = None
     room_number: str
     price: Decimal
     people_number: int
-    room_type_name: str  # Lấy từ bảng room_types
-    branch_id: UUID
+    created_date: Optional[date] = None
     del_flg: int
+    amenities: List[AmenityResponse] = []
 
     class Config:
         from_attributes = True
 
-class BranchRoomsResponse(BaseModel):
+
+class RoomListResponse(BaseModel):
+    items: List[RoomResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class RoomInitializeResponse(BaseModel):
+    total_rooms: int
+    available_rooms: int
+    occupied_rooms: int
+
+
+class RoomTypeResponse(BaseModel):
+    room_type_id: UUID
+    name: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RoomUpsertRequest(BaseModel):
+    room_id: Optional[UUID] = None          # None => insert, có giá trị => update
     branch_id: UUID
-    rooms: List[RoomResponseWithTypeName]
+    room_type_id: Optional[UUID] = None
+    room_number: str
+    price: Optional[Decimal] = None
+    people_number: Optional[int] = 1
+    del_flg: int = 0                        # 0: còn trống, 1: đã đặt, 2: đang sử dụng, 3: không sử dụng
+    amenity_ids: List[UUID] = []
