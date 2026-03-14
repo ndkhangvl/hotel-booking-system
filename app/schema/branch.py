@@ -12,11 +12,11 @@ class BranchCreate(BranchBase):
     created_user: Optional[UUID] = None
 
 class BranchUpdate(BaseModel):
-    name: Optional[str] = Field(None, max_length=100)
-    address: Optional[str] = Field(None, max_length=255)
-    phone: Optional[str] = Field(None, max_length=15)
-    updated_user: Optional[UUID] = None
-    del_flg: Optional[int] = None
+    branch_id: Optional[UUID] = None
+    name: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    created_user: Optional[UUID] = None # <--- Phải có cái này!
 
 class BranchResponse(BranchBase):
     branch_id: UUID

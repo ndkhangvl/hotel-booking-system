@@ -43,4 +43,3 @@ async def seed_db():
 app.include_router(user.router)
 app.include_router(branch.router)
 app.include_router(branch.routerForUser)
-app.include_router(room.routerForUser)

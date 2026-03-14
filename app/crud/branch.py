@@ -3,59 +3,47 @@ from app.schema.branch import BranchCreate, BranchUpdate
 from uuid import UUID
 from psycopg.rows import dict_row
 
-def create_branch(branch: BranchCreate):
+def create_branch(branch):
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        # THÊM row_factory=dict_row để trả về Dict ngay lập tức
+        with conn.cursor(row_factory=dict_row) as cur:
+            data = branch.model_dump() if hasattr(branch, 'model_dump') else branch.__dict__
             cur.execute("""
                 INSERT INTO branches (name, address, phone, created_user)
                 VALUES (%s, %s, %s, %s)
                 RETURNING *;
-            """, (branch.name, branch.address, branch.phone, branch.created_user))
-            new_branch = cur.fetchone()
-        conn.commit()
-        return new_branch
+            """, (data.get('name'), data.get('address'), data.get('phone'), data.get('created_user')))
+            return cur.fetchone()
 
 def get_branch_by_id(branch_id: UUID):
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur: # THÊM row_factory
             cur.execute("SELECT * FROM branches WHERE branch_id = %s AND del_flg = 0;", (branch_id,))
             return cur.fetchone()
 
 def update_branch(branch_id: UUID, branch_data: BranchUpdate):
     with get_connection() as conn:
-        with conn.cursor() as cur:
-            # Lấy các trường cần update (loại bỏ các trường None)
-            update_data = branch_data.model_dump(exclude_unset=True)
-            if not update_data:
-                return None
+        with conn.cursor(row_factory=dict_row) as cur: # THÊM row_factory
+            update_dict = branch_data.model_dump(exclude_unset=True)
+            if "branch_id" in update_dict: del update_dict["branch_id"]
+            if not update_dict: return None
             
-            # Xây dựng câu lệnh SQL động
-            query = "UPDATE branches SET "
-            query += ", ".join([f"{key} = %s" for key in update_data.keys()])
-            query += ", updated_date = CURRENT_DATE, updated_time = CURRENT_TIME"
-            query += " WHERE branch_id = %s RETURNING *;"
+            query = f"UPDATE branches SET {', '.join([f'{k} = %s' for k in update_dict.keys()])}, " \
+                    f"updated_date = CURRENT_DATE, updated_time = CURRENT_TIME WHERE branch_id = %s RETURNING *;"
             
-            params = list(update_data.values())
-            params.append(branch_id)
-            
-            cur.execute(query, tuple(params))
-            updated_branch = cur.fetchone()
-        conn.commit()
-        return updated_branch
+            params = list(update_dict.values()) + [branch_id]
+            cur.execute(query, params)
+            return cur.fetchone()
 
 def delete_branch(branch_id: UUID, user_id: UUID):
-    """Thực hiện Soft Delete bằng cách chuyển del_flg = 1"""
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur: # THÊM row_factory
             cur.execute("""
-                UPDATE branches 
-                SET del_flg = 1, updated_user = %s, updated_date = CURRENT_DATE, updated_time = CURRENT_TIME
-                WHERE branch_id = %s 
-                RETURNING *;
+                UPDATE branches SET del_flg = 1, updated_user = %s, 
+                updated_date = CURRENT_DATE, updated_time = CURRENT_TIME
+                WHERE branch_id = %s RETURNING *;
             """, (user_id, branch_id))
-            deleted_branch = cur.fetchone()
-        conn.commit()
-        return deleted_branch
+            return cur.fetchone()
 
 def get_initialize_stats() -> dict:
     """Trả về tổng chi nhánh, số chi nhánh hoạt động, tổng số phòng (join branches + rooms)."""

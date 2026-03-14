@@ -33,33 +33,37 @@ async def branches_list(
     except Exception as e:
         print(f"Error logic: {e}")
         raise HTTPException(status_code=500, detail=f"Lỗi: {str(e)}")
-    
-@router.post("/", response_model=BranchResponse)
-async def create_new_branch(branch: BranchCreate):
-    try:
-        row = crud_branch.create_branch(branch)
-        if not row:
-            raise HTTPException(status_code=400, detail="Không thể tạo chi nhánh")
-        
-        # Map thủ công từ tuple sang dict
-        return {
-            "branch_id": row[0],
-            "name": row[1],
-            "address": row[2],
-            "phone": row[3],
-            "created_date": row[4],
-            "created_time": row[5],
-            "created_user": row[6],
-            "updated_date": row[7],
-            "updated_time": row[8],
-            "updated_user": row[9],
-            "del_flg": row[10]
-        }
-    except Exception as e:
-        # log lỗi ra console để debug nếu cần
-        print(f"Error detail: {e}")
-        raise HTTPException(status_code=400, detail=f"Lỗi tạo chi nhánh: {str(e)}")
 
+def map_branch_row(row):
+    if not row: return None
+    return {
+        "branch_id": row[0], "name": row[1], "address": row[2], "phone": row[3],
+        "created_date": row[4], "created_time": row[5], "created_user": row[6],
+        "updated_date": row[7], "updated_time": row[8], "updated_user": row[9],
+        "del_flg": row[10]
+    }
+
+@router.post("/", response_model=BranchResponse)
+async def upsert_branch(branch_data: BranchUpdate):
+    try:
+        if branch_data.branch_id:
+            row = crud_branch.update_branch(branch_data.branch_id, branch_data)
+            action = "cập nhật"
+        else:
+            if not branch_data.name or not branch_data.address:
+                raise HTTPException(status_code=400, detail="Thiếu thông tin bắt buộc")
+            row = crud_branch.create_branch(branch_data)
+            action = "tạo mới"
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Không thể {action} chi nhánh")
+        
+        # Vì row đã là Dict (do dict_row), trả về luôn!
+        return row 
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
 @routerForUser.get("/branches-list", response_model=BranchPaginationResponse)
 async def branches_list(
     page: int = Query(default=1, ge=1),
@@ -93,72 +97,13 @@ async def search_branches_api(
 @router.get("/{branch_id}", response_model=BranchResponse)
 async def read_branch(branch_id: UUID):
     row = crud_branch.get_branch_by_id(branch_id)
-    
-    # Kiểm tra nếu không tìm thấy dữ liệu
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
-    
-    # 'row' hiện tại là một tuple: (UUID(...), 'Aurora Trà Vinh', ...)
-    # Chúng ta cần chuyển nó thành dict để Pydantic validate được
-    return {
-        "branch_id": row[0],
-        "name": row[1],
-        "address": row[2],
-        "phone": row[3],
-        "created_date": row[4],
-        "created_time": row[5],
-        "created_user": row[6],
-        "updated_date": row[7],
-        "updated_time": row[8],
-        "updated_user": row[9],
-        "del_flg": row[10]
-    }
-
-@router.patch("/{branch_id}", response_model=BranchResponse)
-async def update_existing_branch(branch_id: UUID, branch_data: BranchUpdate):
-    row = crud_branch.update_branch(branch_id, branch_data)
-    
-    if not row:
-        raise HTTPException(
-            status_code=404, 
-            detail="Không tìm thấy chi nhánh hoặc không có dữ liệu thay đổi"
-        )
-    
-    # Map từ tuple sang dict
-    return {
-        "branch_id": row[0],
-        "name": row[1],
-        "address": row[2],
-        "phone": row[3],
-        "created_date": row[4],
-        "created_time": row[5],
-        "created_user": row[6],
-        "updated_date": row[7],
-        "updated_time": row[8],
-        "updated_user": row[9],
-        "del_flg": row[10]
-    }
+    return row # Không cần map row[0], row[1] nữa
 
 @router.delete("/{branch_id}", response_model=BranchResponse)
 async def soft_delete_branch(branch_id: UUID, current_user_id: UUID):
-    # current_user_id hiện tại đang truyền qua query parameter, 
-    # sau này bạn nên lấy từ JWT token để bảo mật hơn.
     row = crud_branch.delete_branch(branch_id, current_user_id)
-    
     if not row:
-        raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh để xóa")
-    
-    # Map từ tuple sang dict
-    return {
-        "branch_id": row[0],
-        "name": row[1],
-        "address": row[2],
-        "phone": row[3],
-        "created_date": row[4],
-        "created_time": row[5],
-        "created_user": row[6],
-        "updated_date": row[7],
-        "updated_time": row[8],
-        "updated_user": row[9],
-        "del_flg": row[10]
-    }
+        raise HTTPException(status_code=404, detail="Không tìm thấy")
+    return row # Trả về trực tiếp
