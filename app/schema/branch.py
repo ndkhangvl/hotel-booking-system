@@ -1,29 +1,44 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from datetime import date, time
 from uuid import UUID
-from typing import Optional, List
-from datetime import date
+from typing import List, Optional
 
+class BranchBase(BaseModel):
+    name: str = Field(..., max_length=100)
+    address: str = Field(..., max_length=255)
+    phone: Optional[str] = Field(None, max_length=15)
 
-class BranchResponse(BaseModel):
+class BranchCreate(BranchBase):
+    created_user: Optional[UUID] = None
+
+class BranchUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    address: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=15)
+    updated_user: Optional[UUID] = None
+    del_flg: Optional[int] = None
+
+class BranchResponse(BranchBase):
     branch_id: UUID
-    name: str
-    address: str
-    phone: Optional[str] = None
-    total_rooms: int
     created_date: Optional[date] = None
+    created_time: Optional[time] = None
+    created_user: Optional[UUID] = None
+    updated_date: Optional[date] = None
+    updated_time: Optional[time] = None
+    updated_user: Optional[UUID] = None
     del_flg: int
+    total_rooms: int = 0 
 
     class Config:
         from_attributes = True
 
-
-class BranchListResponse(BaseModel):
+# Model bao bọc phân trang
+class BranchPaginationResponse(BaseModel):
     items: List[BranchResponse]
     total: int
     page: int
     page_size: int
     total_pages: int
-
 
 class BranchInitializeResponse(BaseModel):
     total_branches: int

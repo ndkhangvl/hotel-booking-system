@@ -1,6 +1,6 @@
 import psycopg
 
-DB_HOST = "100.127.119.128"
+DB_HOST = "100.91.208.21"
 DB_PORT = 26257
 DB_USER = "root"
 DB_NAME = "hotel_booking"
