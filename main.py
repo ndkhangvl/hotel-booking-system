@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.cockroach import test_cockroach_connection, create_all_tables, create_database_if_not_exists, seed_basic_hotel_data
-from app.api import user, branch
+from app.api import user, branch, room
 
 app = FastAPI(title="FastAPI + CockroachDB + MongoDB")
 
@@ -40,3 +40,4 @@ async def seed_db():
 
 app.include_router(user.router)
 app.include_router(branch.router)
+app.include_router(room.router)
