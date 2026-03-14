@@ -98,34 +98,30 @@ def get_initialize_stats() -> dict:
 
 
 def get_branches_list(page: int = 1, page_size: int = 10) -> dict:
-    """Trả về danh sách chi nhánh có phân trang, kèm tổng số phòng của mỗi chi nhánh."""
     offset = (page - 1) * page_size
 
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            # Đếm tổng để tính phân trang
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM branches
-                WHERE del_flg = 0;
-            """)
+            # 1. Đếm tổng số bản ghi
+            cur.execute("SELECT COUNT(*) AS total FROM branches WHERE del_flg = 0;")
             total = int(cur.fetchone()["total"] or 0)
 
-            # Lấy danh sách chi nhánh kèm tổng phòng
+            # 2. Lấy danh sách (Bổ sung đủ các cột để map vào BranchResponse)
             cur.execute("""
-                SELECT
-                    b.branch_id,
-                    b.name,
-                    b.address,
-                    b.phone,
-                    b.created_date,
+                SELECT 
+                    b.branch_id, b.name, b.address, b.phone, 
+                    b.created_date, b.created_time, b.created_user,
+                    b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg,
                     COUNT(r.room_id) AS total_rooms
                 FROM branches b
-                LEFT JOIN rooms r
-                    ON r.branch_id = b.branch_id AND r.del_flg = 0
+                LEFT JOIN rooms r ON r.branch_id = b.branch_id AND r.del_flg = 0
                 WHERE b.del_flg = 0
-                GROUP BY b.branch_id, b.name, b.address, b.phone, b.created_date, b.del_flg
+                GROUP BY 
+                    b.branch_id, b.name, b.address, b.phone, 
+                    b.created_date, b.created_time, b.created_user,
+                    b.updated_date, b.updated_time, b.updated_user,
+                    b.del_flg
                 ORDER BY b.name
                 LIMIT %s OFFSET %s;
             """, (page_size, offset))
