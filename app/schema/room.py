@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import date, time
 from decimal import Decimal
 from uuid import UUID
@@ -36,3 +36,19 @@ class RoomResponse(RoomBase):
 
     class Config:
         from_attributes = True
+
+class RoomResponseWithTypeName(BaseModel):
+    room_id: UUID
+    room_number: str
+    price: Decimal
+    people_number: int
+    room_type_name: str  # Lấy từ bảng room_types
+    branch_id: UUID
+    del_flg: int
+
+    class Config:
+        from_attributes = True
+
+class BranchRoomsResponse(BaseModel):
+    branch_id: UUID
+    rooms: List[RoomResponseWithTypeName]

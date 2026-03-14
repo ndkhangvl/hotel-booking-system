@@ -5,6 +5,7 @@ from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, Branch
 from app.crud import branch as crud_branch
 
 router = APIRouter(prefix="/admin/branches", tags=["Admin - Branches"])
+routerForUser = APIRouter(prefix="/user/branches", tags=["User - Branches"])
 
 @router.get("/initialize", response_model=BranchResponse)
 async def initialize():
@@ -59,10 +60,36 @@ async def create_new_branch(branch: BranchCreate):
         print(f"Error detail: {e}")
         raise HTTPException(status_code=400, detail=f"Lỗi tạo chi nhánh: {str(e)}")
 
-@router.get("/", response_model=List[BranchResponse])
-async def read_branches():
-    return crud_branch.get_all_branches()
+@routerForUser.get("/branches-list", response_model=BranchPaginationResponse)
+async def branches_list(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100)
+):
+    try:
+        # Nhờ dict_row, hàm này trả về cấu trúc dict lồng nhau 
+        # mà Pydantic có thể đọc được ngay lập tức.
+        return crud_branch.get_all_active_branches(page=page, page_size=page_size)
+    except Exception as e:
+        print(f"Error logic: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi: {str(e)}")
 
+@routerForUser.get("/search", response_model=BranchPaginationResponse)
+async def search_branches_api(
+    keyword: str = Query(..., min_length=1, description="Từ khóa tìm kiếm (tên, địa chỉ)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100)
+):
+    """
+    Tìm kiếm chi nhánh theo tên hoặc địa chỉ (không phân biệt hoa thường).
+    """
+    try:
+        # Gọi hàm từ crud_branch
+        return crud_branch.search_branches(keyword=keyword, page=page, page_size=page_size)
+    except Exception as e:
+        # Log lỗi thực tế ra console để debug
+        print(f"Search Error: {e}")
+        raise HTTPException(status_code=500, detail="Lỗi khi tìm kiếm chi nhánh")
+    
 @router.get("/{branch_id}", response_model=BranchResponse)
 async def read_branch(branch_id: UUID):
     row = crud_branch.get_branch_by_id(branch_id)
