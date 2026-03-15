@@ -282,6 +282,21 @@ def seed_basic_hotel_data():
         ('c3000000-0000-0000-0000-000000000009', 'Hồ bơi', '/icons/pool.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
         ('c3000000-0000-0000-0000-000000000010', 'Phòng tập gym', '/icons/gym.png', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);""",
 
+        """INSERT INTO users (
+            user_id, name, email, phone, password, role,
+            created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
+        ) VALUES
+        ('e5000000-0000-0000-0000-000000000001', 'Khang Admin', 'admin@aurora.com', '0901234567', 'hashed_password_admin', 'Admin', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        
+        ('e5000000-0000-0000-0000-000000000002', 'Lễ tân Cần Thơ', 'receptionist.ct@aurora.com', '0902345678', 'hashed_password_recep', 'Receptionist', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        
+        -- Tài khoản Khách hàng
+        ('e5000000-0000-0000-0000-000000000003', 'Nguyễn Văn A', 'nguyenvana@gmail.com', '0903456789', 'hashed_password_cus1', 'Customer', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        ('e5000000-0000-0000-0000-000000000004', 'Trần Thị B', 'tranthib@gmail.com', '0904567890', 'hashed_password_cus2', 'Customer', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
+        
+        -- Tài khoản Khách vãng lai (Guest)
+        ('e5000000-0000-0000-0000-000000000005', 'Khách Vãng Lai', 'guest1@gmail.com', '0905678901', 'hashed_password_guest', 'Guest', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);"""
+
         """INSERT INTO rooms (
             room_id, branch_id, room_type_id, room_number, price, people_number,
             created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
