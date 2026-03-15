@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import List
-from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeResponse, AmenityResponse, RoomUpsertRequest
+from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeResponse, AmenityResponse, RoomUpsertRequest, RoomResponse
 from app.crud import room as crud_room
 
 router = APIRouter(prefix="/admin/rooms", tags=["Admin - Rooms"])
+routerForUser = APIRouter(prefix="/user", tags=["User - Amenities"])
 
 
 @router.post("", status_code=200)
@@ -46,6 +47,44 @@ async def amenities():
         return crud_room.get_amenities()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách tiện ích: {e}")
+
+
+@routerForUser.get("/amenities", response_model=List[AmenityResponse])
+async def amenities_for_user():
+    """
+    Trả về danh sách tiện ích cho trang người dùng.
+    """
+    try:
+        return crud_room.get_amenities()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách tiện ích: {e}")
+
+
+@routerForUser.get("/rooms", response_model=List[RoomResponse])
+async def rooms_for_user(
+    limit: int = Query(default=4, ge=1, le=20, description="Số phòng cần lấy"),
+):
+    """
+    Trả về danh sách phòng nổi bật cho trang người dùng.
+    """
+    try:
+        return crud_room.get_user_rooms(limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
+
+
+@routerForUser.get("/room-types", response_model=List[RoomTypeResponse])
+async def room_types_for_user(
+    limit: int = Query(default=4, ge=1, le=20, description="Số loại phòng cần lấy"),
+):
+    """
+    Trả về danh sách loại phòng cho trang người dùng.
+    Dữ liệu lấy từ bảng room_types.
+    """
+    try:
+        return crud_room.get_room_types()[:limit]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách loại phòng: {e}")
 
 
 @router.get("/room-types", response_model=List[RoomTypeResponse])

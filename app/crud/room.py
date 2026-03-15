@@ -182,3 +182,67 @@ def get_rooms_list(branch_id: str, page: int = 1, page_size: int = 10) -> dict:
         "page_size":   page_size,
         "total_pages": total_pages,
     }
+
+
+def get_user_rooms(limit: int = 4) -> list:
+    """Trả về danh sách phòng hoạt động cho trang người dùng, giới hạn theo limit."""
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT
+                    r.room_id,
+                    r.branch_id,
+                    r.room_type_id,
+                    rt.name AS room_type_name,
+                    r.room_number,
+                    r.price,
+                    r.people_number,
+                    r.created_date,
+                    r.del_flg
+                FROM rooms r
+                LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
+                WHERE r.del_flg = 0
+                ORDER BY r.created_date DESC, r.room_number
+                LIMIT %s;
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+
+        rooms = [dict(r) for r in rows]
+
+        if rooms:
+            room_ids_str = [str(r["room_id"]) for r in rooms]
+            with conn.cursor(row_factory=dict_row) as cur2:
+                cur2.execute(
+                    """
+                    SELECT ra.room_id::text AS room_id, a.amenity_id, a.name, a.icon_url
+                    FROM room_amenities ra
+                    JOIN amenities a ON a.amenity_id = ra.amenity_id
+                    WHERE ra.room_id::text = ANY(%s)
+                    ORDER BY a.name;
+                    """,
+                    (room_ids_str,),
+                )
+                amenity_rows = cur2.fetchall()
+
+            amenities_map = {}
+            for ar in amenity_rows:
+                rid = ar["room_id"]
+                if rid not in amenities_map:
+                    amenities_map[rid] = []
+                amenities_map[rid].append(
+                    {
+                        "amenity_id": ar["amenity_id"],
+                        "name": ar["name"],
+                        "icon_url": ar["icon_url"],
+                    }
+                )
+
+            for room in rooms:
+                room["amenities"] = amenities_map.get(str(room["room_id"]), [])
+        else:
+            rooms = []
+
+    return rooms
