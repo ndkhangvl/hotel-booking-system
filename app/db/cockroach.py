@@ -1,9 +1,13 @@
 import psycopg
+import os
+from dotenv import load_dotenv
 
-DB_HOST = "100.87.133.42"
-DB_PORT = 26257
-DB_USER = "root"
-DB_NAME = "hotel_booking"
+load_dotenv()
+
+DB_HOST = os.getenv("COCKROACH_DB_HOST")
+DB_PORT = os.getenv("COCKROACH_DB_PORT")
+DB_USER = os.getenv("COCKROACH_DB_USER")
+DB_NAME = os.getenv("COCKROACH_DB_NAME")
 
 DEFAULT_DB_URL = f"postgresql://{DB_USER}@{DB_HOST}:{DB_PORT}/defaultdb?sslmode=disable"
 TARGET_DB_URL = f"postgresql://{DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=disable"

@@ -21,15 +21,14 @@ async def register(user_in: UserCreate):
 async def login(login_data: UserLogin):
     user = crud_user.get_user_by_email(login_data.email)
     
-    # Kiểm tra user và verify password đã hash
     if not user or not security.verify_password(login_data.password, user["password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Không đúng email hoặc password"
         )
     
-    # Tạo JWT token
-    access_token = security.create_access_token(user["user_id"])
+    # Tạo JWT token, truyền thêm role vào
+    access_token = security.create_access_token(user["user_id"], user.get("role"))
     
     return {
         "access_token": access_token,

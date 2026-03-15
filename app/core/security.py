@@ -17,11 +17,12 @@ def verify_password(plain_password: str, stored_password: str) -> bool:
         return False
     return plain_password == stored_password
 
-def create_access_token(user_id: str) -> str:
-    """Tạo JWT Token chứa UUID của User"""
+def create_access_token(user_id: str, role: str = None) -> str:
     expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     to_encode = {
-        "sub": str(user_id), 
+        "sub": str(user_id),
         "exp": expire
     }
+    if role is not None:
+        to_encode["role"] = role
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
