@@ -20,13 +20,6 @@ async def read_bookings():
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi lấy danh sách booking: {e}")
 
-@router.get("/receptionist/daily", response_model=List[BookingResponse])
-async def get_daily_dashboard(target_date: Optional[date] = None, status: Optional[str] = None):
-    try:
-        return crud_booking.get_daily_bookings_for_receptionist(target_date, status)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Lỗi lấy dữ liệu lễ tân: {e}")
-
 @router.get("/{booking_id}", response_model=BookingResponse)
 async def read_booking(booking_id: str):
     booking = crud_booking.get_booking_by_id(booking_id)

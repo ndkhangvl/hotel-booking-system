@@ -1,6 +1,7 @@
 from app.db.cockroach import get_connection
 from app.schema.booking import BookingCreate, BookingAdminUpdate
 from datetime import date, datetime
+from enum import Enum 
 
 def create_booking(booking: BookingCreate, total_price: float = 0.0, current_user_id: str = None):
     with get_connection() as conn:
@@ -41,37 +42,26 @@ def get_all_bookings():
             cur.execute("SELECT * FROM bookings WHERE del_flg = 0 ORDER BY created_date DESC, created_time DESC;")
             rows = cur.fetchall()
             
-            # Nếu database chưa có gì thì trả về mảng rỗng
             if not rows:
                 return []
             
-            # Lấy danh sách tên cột
             columns = [desc[0] for desc in cur.description]
-            
-            # Chuyển List[Tuple] thành List[Dict]
             result = [dict(zip(columns, row)) for row in rows]
             
             return result
 
-def get_booking_by_id(booking_id: str):
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM bookings WHERE booking_id = %s AND del_flg = 0;", (booking_id,))
-            return cur.fetchone()
-
-from enum import Enum # Nhớ thêm dòng import Enum này ở đầu file nhé!
-
 def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate, admin_id: str = None):
     update_data = booking_update.model_dump(exclude_unset=True)
+    
+    # Nếu không có dữ liệu cập nhật, trả về None hoặc xử lý lỗi ở tầng API
     if not update_data:
-        return get_booking_by_id(booking_id)
+        return None
 
     set_clauses = []
     values = []
     
     for key, value in update_data.items():
         set_clauses.append(f"{key} = %s")
-        # Xử lý các kiểu dữ liệu đặc biệt (UUID, Enum) để DB hiểu được
         if isinstance(value, Enum):
             values.append(value.value)
         elif hasattr(value, 'hex'):
@@ -79,7 +69,6 @@ def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate,
         else:
             values.append(value)
 
-    # Cập nhật thông tin người sửa
     now = datetime.now()
     set_clauses.append("updated_date = %s")
     values.append(now.date())
@@ -100,7 +89,6 @@ def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate,
             cur.execute(query, tuple(values))
             updated_booking = cur.fetchone()
             
-            # Khắc phục lỗi Tuple thành Dictionary
             if updated_booking and not isinstance(updated_booking, dict):
                 columns = [desc[0] for desc in cur.description]
                 updated_booking = dict(zip(columns, updated_booking))
@@ -119,26 +107,13 @@ def delete_booking(booking_id: str, admin_id: str = None):
                 RETURNING *;
             """, (now.date(), now.time(), str(admin_id) if admin_id else None, booking_id))
             deleted_booking = cur.fetchone()
+            
+            if deleted_booking and not isinstance(deleted_booking, dict):
+                columns = [desc[0] for desc in cur.description]
+                deleted_booking = dict(zip(columns, deleted_booking))
+                
         conn.commit()
         return deleted_booking
-
-def get_daily_bookings_for_receptionist(target_date: date = None, status_filter: str = None):
-    if not target_date:
-        target_date = date.today()
-
-    query = "SELECT * FROM bookings WHERE del_flg = 0 AND (from_date = %s OR to_date = %s)"
-    params = [target_date, target_date]
-
-    if status_filter:
-        query += " AND status = %s"
-        params.append(status_filter)
-
-    query += " ORDER BY from_date ASC, created_time DESC;"
-
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, tuple(params))
-            return cur.fetchall()
 
 def confirm_booking(booking_id: str, receptionist_id: str = None):
     with get_connection() as conn:
@@ -152,7 +127,6 @@ def confirm_booking(booking_id: str, receptionist_id: str = None):
             """, (now.date(), now.time(), str(receptionist_id) if receptionist_id else None, booking_id))
             updated_booking = cur.fetchone()
             
-            # Khắc phục lỗi Tuple thành Dictionary
             if updated_booking and not isinstance(updated_booking, dict):
                 columns = [desc[0] for desc in cur.description]
                 updated_booking = dict(zip(columns, updated_booking))
