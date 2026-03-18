@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List
 from uuid import UUID
-from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchResponse, BranchPaginationResponse, BranchInitializeResponse
+from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchResponse, BranchPaginationResponse, BranchInitializeResponse, BranchDetailResponse
 from app.crud import branch as crud_branch
 
 router = APIRouter(prefix="/admin/branches", tags=["Admin - Branches"])
@@ -93,6 +93,14 @@ async def search_branches_api(
         # Log lỗi thực tế ra console để debug
         print(f"Search Error: {e}")
         raise HTTPException(status_code=500, detail="Lỗi khi tìm kiếm chi nhánh")
+
+
+@routerForUser.get("/{branch_id}", response_model=BranchDetailResponse)
+async def read_branch_for_user(branch_id: UUID):
+    row = crud_branch.get_active_branch_detail(str(branch_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
+    return row
     
 @router.get("/{branch_id}", response_model=BranchResponse)
 async def read_branch(branch_id: UUID):

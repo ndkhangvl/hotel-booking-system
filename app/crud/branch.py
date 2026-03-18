@@ -209,3 +209,55 @@ def search_branches(keyword: str, page: int = 1, page_size: int = 10) -> dict:
         "page_size": page_size,
         "total_pages": math.ceil(total / page_size) if total > 0 else 1,
     }
+
+
+def get_active_branch_detail(branch_id: str) -> dict | None:
+    """Trả về chi tiết 1 chi nhánh hoạt động, kèm danh sách loại phòng và giá từ bảng rooms."""
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT
+                    b.branch_id, b.name, b.address, b.phone,
+                    b.created_date, b.created_time, b.created_user,
+                    b.updated_date, b.updated_time, b.updated_user,
+                    b.del_flg,
+                    COUNT(r.room_id) AS total_rooms
+                FROM branches b
+                LEFT JOIN rooms r ON r.branch_id = b.branch_id AND r.del_flg = 0
+                WHERE b.branch_id = %s AND b.del_flg = 0
+                GROUP BY
+                    b.branch_id, b.name, b.address, b.phone,
+                    b.created_date, b.created_time, b.created_user,
+                    b.updated_date, b.updated_time, b.updated_user,
+                    b.del_flg;
+                """,
+                (branch_id,),
+            )
+            branch = cur.fetchone()
+
+            if not branch:
+                return None
+
+            cur.execute(
+                """
+                SELECT
+                    rt.room_type_id,
+                    rt.name,
+                    rt.description,
+                    MIN(r.price) AS price
+                FROM rooms r
+                JOIN room_types rt ON rt.room_type_id = r.room_type_id
+                WHERE r.branch_id = %s
+                  AND r.del_flg = 0
+                  AND rt.del_flg = 0
+                GROUP BY rt.room_type_id, rt.name, rt.description
+                ORDER BY rt.name;
+                """,
+                (branch_id,),
+            )
+            room_types = cur.fetchall()
+
+    result = dict(branch)
+    result["room_types"] = [dict(rt) for rt in room_types]
+    return result
