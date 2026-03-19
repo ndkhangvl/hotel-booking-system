@@ -106,7 +106,6 @@ async def insert_sample_room_data():
         "branch_id": "uuid-branch-001",
         "branch_name": "Chi nhánh Hà Nội",
         "room_type_name": "Deluxe",
-        "room_number": "101",
         "price": {"$numberDecimal": "1200000"},
         "people_number": 2,
         "amenities": ["Wifi", "Hồ bơi", "TV", "Ban công"],

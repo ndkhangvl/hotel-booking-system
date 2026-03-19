@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import List
-from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeResponse, AmenityResponse, RoomUpsertRequest, RoomResponse
+from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeResponse, AmenityResponse, RoomUpsertRequest, RoomResponse, BranchRoomListResponse, BranchRoomUpsertRequest, BranchRoomDeleteRequest
 from app.crud import room as crud_room
 
 router = APIRouter(prefix="/admin/rooms", tags=["Admin - Rooms"])
@@ -122,6 +122,35 @@ async def rooms_list(
         return crud_room.get_rooms_by_branch(branch_id, page, page_size, active_only=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
+
+
+@router.get("/branch-rooms-list", response_model=BranchRoomListResponse)
+async def branch_rooms_list(
+    branch_id: str = Query(..., description="UUID của chi nhánh"),
+    page: int = Query(default=1, ge=1, description="Số trang (bắt đầu từ 1)"),
+    page_size: int = Query(default=10, ge=1, le=100, description="Số bản ghi mỗi trang"),
+):
+    try:
+        return crud_room.get_branch_rooms_by_branch(branch_id, page, page_size)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách branch rooms: {e}")
+
+
+@router.post("/branch-rooms", status_code=200)
+async def upsert_branch_room(body: BranchRoomUpsertRequest):
+    try:
+        branch_room_id = crud_room.upsert_branch_room(body.model_dump())
+        return {"branch_room_id": branch_room_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lưu branch room: {e}")
+
+
+@router.delete("/branch-rooms", status_code=200)
+async def remove_branch_room(body: BranchRoomDeleteRequest, branch_id: str = Query(..., description="UUID của chi nhánh")):
+    deleted = crud_room.delete_branch_room(str(body.branch_room_id), branch_id=branch_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Không tìm thấy branch room")
+    return {"success": True}
 
 @routerForUser.get("/rooms-list", response_model=RoomListResponse)
 async def user_get_active_rooms_by_branch(

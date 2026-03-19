@@ -55,5 +55,22 @@ class BranchRoomTypePriceResponse(BaseModel):
     price: Decimal
 
 
+class BranchRoomAmenityResponse(BaseModel):
+    name: str
+    icon_url: Optional[str] = None
+
+
+class BranchRoomDetailResponse(BaseModel):
+    room_id: UUID
+    branch_id: UUID
+    room_type_id: Optional[UUID] = None
+    room_type_name: Optional[str] = None
+    description: Optional[str] = None
+    price: Decimal
+    people_number: int
+    del_flg: int
+    room_amenities: List[BranchRoomAmenityResponse] = []
+
+
 class BranchDetailResponse(BranchResponse):
-    room_types: List[BranchRoomTypePriceResponse] = []
+    rooms: List[BranchRoomDetailResponse] = []

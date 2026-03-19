@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List
 from uuid import UUID
-from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchResponse, BranchPaginationResponse, BranchInitializeResponse, BranchDetailResponse
+from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchPaginationResponse, BranchInitializeResponse, BranchDetailResponse
 from app.crud import branch as crud_branch
 
 router = APIRouter(prefix="/admin/branches", tags=["Admin - Branches"])
@@ -107,11 +107,4 @@ async def get_any_branch(branch_id: UUID):
     row = crud_branch.get_branch_by_id(branch_id, active_only=False)
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
-    return row
-
-@routerForUser.get("/{branch_id}", response_model=BranchResponse)
-async def get_active_branch(branch_id: UUID):
-    row = crud_branch.get_branch_by_id(branch_id, active_only=True)
-    if not row:
-        raise HTTPException(status_code=404, detail="Chi nhánh không tồn tại hoặc đã đóng cửa")
     return row

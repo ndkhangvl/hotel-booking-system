@@ -19,6 +19,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup():
     print("⏳ Đang kiểm tra kết nối CockroachDB...")
+    create_database_if_not_exists()
+    create_all_tables()
     test_cockroach_connection()
     await connect_mongo()
     await test_mongo_connection()

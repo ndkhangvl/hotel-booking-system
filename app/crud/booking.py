@@ -2,10 +2,29 @@ from app.db.cockroach import get_connection
 from app.schema.booking import BookingCreate, BookingAdminUpdate
 from datetime import date, datetime
 from enum import Enum 
+from psycopg.rows import dict_row
+
 
 def create_booking(booking: BookingCreate, total_price: float = 0.0, current_user_id: str = None):
+    nights = (booking.to_date - booking.from_date).days
+    if nights <= 0:
+        raise ValueError("Ngày trả phòng phải sau ngày nhận phòng")
+
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT price
+                FROM rooms
+                WHERE room_id = %s AND del_flg = 0;
+                """,
+                (str(booking.room_id),),
+            )
+            room = cur.fetchone()
+            if not room:
+                raise ValueError("Không tìm thấy phòng để đặt")
+
+            total_price = float(room["price"] or 0) * nights
             now = datetime.now()
             cur.execute("""
                 INSERT INTO bookings (
@@ -27,28 +46,21 @@ def create_booking(booking: BookingCreate, total_price: float = 0.0, current_use
             ))
 
             new_booking = cur.fetchone()
-            columns = [desc[0] for desc in cur.description]
 
         conn.commit()
 
-        if new_booking is None:
-            return None
-
-        return dict(zip(columns, new_booking))
+    return new_booking
 
 def get_all_bookings():
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("SELECT * FROM bookings WHERE del_flg = 0 ORDER BY created_date DESC, created_time DESC;")
             rows = cur.fetchall()
             
             if not rows:
                 return []
-            
-            columns = [desc[0] for desc in cur.description]
-            result = [dict(zip(columns, row)) for row in rows]
-            
-            return result
+
+            return rows
 
 def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate, admin_id: str = None):
     update_data = booking_update.model_dump(exclude_unset=True)
@@ -85,20 +97,16 @@ def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate,
     query = f"UPDATE bookings SET {set_query} WHERE booking_id = %s AND del_flg = 0 RETURNING *;"
 
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(query, tuple(values))
             updated_booking = cur.fetchone()
-            
-            if updated_booking and not isinstance(updated_booking, dict):
-                columns = [desc[0] for desc in cur.description]
-                updated_booking = dict(zip(columns, updated_booking))
                 
         conn.commit()
         return updated_booking
 
 def delete_booking(booking_id: str, admin_id: str = None):
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             now = datetime.now()
             cur.execute("""
                 UPDATE bookings 
@@ -107,17 +115,13 @@ def delete_booking(booking_id: str, admin_id: str = None):
                 RETURNING *;
             """, (now.date(), now.time(), str(admin_id) if admin_id else None, booking_id))
             deleted_booking = cur.fetchone()
-            
-            if deleted_booking and not isinstance(deleted_booking, dict):
-                columns = [desc[0] for desc in cur.description]
-                deleted_booking = dict(zip(columns, deleted_booking))
                 
         conn.commit()
         return deleted_booking
 
 def confirm_booking(booking_id: str, receptionist_id: str = None):
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             now = datetime.now()
             cur.execute("""
                 UPDATE bookings 
@@ -126,17 +130,13 @@ def confirm_booking(booking_id: str, receptionist_id: str = None):
                 RETURNING *;
             """, (now.date(), now.time(), str(receptionist_id) if receptionist_id else None, booking_id))
             updated_booking = cur.fetchone()
-            
-            if updated_booking and not isinstance(updated_booking, dict):
-                columns = [desc[0] for desc in cur.description]
-                updated_booking = dict(zip(columns, updated_booking))
                 
         conn.commit()
         return updated_booking
 
 def cancel_booking(booking_id: str, receptionist_id: str = None):
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             now = datetime.now()
             cur.execute("""
                 UPDATE bookings 
@@ -145,17 +145,13 @@ def cancel_booking(booking_id: str, receptionist_id: str = None):
                 RETURNING *;
             """, (now.date(), now.time(), str(receptionist_id) if receptionist_id else None, booking_id))
             updated_booking = cur.fetchone()
-            
-            if updated_booking and not isinstance(updated_booking, dict):
-                columns = [desc[0] for desc in cur.description]
-                updated_booking = dict(zip(columns, updated_booking))
                 
         conn.commit()
         return updated_booking
     
 def process_check_in(booking_id: str, receptionist_id: str = None):
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             now = datetime.now()
             cur.execute("""
                 UPDATE bookings 
@@ -164,17 +160,13 @@ def process_check_in(booking_id: str, receptionist_id: str = None):
                 RETURNING *;
             """, (now.date(), now.time(), str(receptionist_id) if receptionist_id else None, booking_id))
             updated_booking = cur.fetchone()
-            
-            if updated_booking and not isinstance(updated_booking, dict):
-                columns = [desc[0] for desc in cur.description]
-                updated_booking = dict(zip(columns, updated_booking))
                 
         conn.commit()
         return updated_booking
 
 def process_check_out(booking_id: str, receptionist_id: str = None):
     with get_connection() as conn:
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             now = datetime.now()
             cur.execute("""
                 UPDATE bookings 
@@ -183,9 +175,5 @@ def process_check_out(booking_id: str, receptionist_id: str = None):
                 RETURNING *;
             """, (now.date(), now.time(), str(receptionist_id) if receptionist_id else None, booking_id))
             updated_booking = cur.fetchone()
-            
-            if updated_booking and not isinstance(updated_booking, dict):
-                columns = [desc[0] for desc in cur.description]
-                updated_booking = dict(zip(columns, updated_booking))
         conn.commit()
         return updated_booking

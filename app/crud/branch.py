@@ -41,66 +41,6 @@ def get_branch_by_id(branch_id: UUID, active_only: bool = False):
             cur.execute(query, (branch_id,))
             return cur.fetchone()
         
-def get_branch_detail_with_rooms(branch_id: UUID, active_only: bool = False):
-    """
-    Lấy thông tin chi tiết 1 chi nhánh, 
-    bao gồm danh sách toàn bộ phòng và tiện ích của từng phòng.
-    """
-    with get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            # 1. Lấy thông tin Chi nhánh
-            branch_query = "SELECT * FROM branches WHERE branch_id = %s"
-            if active_only:
-                branch_query += " AND del_flg = 0"
-            
-            cur.execute(branch_query, (branch_id,))
-            branch = cur.fetchone()
-
-            if not branch:
-                return None
-
-            # 2. Lấy danh sách các Phòng thuộc chi nhánh này
-            room_query = """
-                SELECT r.*, rt.name AS room_type_name
-                FROM rooms r
-                LEFT JOIN room_types rt ON r.room_type_id = rt.room_type_id
-                WHERE r.branch_id = %s
-            """
-            if active_only:
-                room_query += " AND r.del_flg = 0"
-            
-            room_query += " ORDER BY r.room_number ASC"
-            cur.execute(room_query, (branch_id,))
-            rooms = cur.fetchall()
-
-            # Chuyển sang list để có thể gán thêm key 'amenities'
-            branch["rooms"] = [dict(r) for r in rooms]
-            branch["total_rooms"] = len(branch["rooms"])
-
-            # 3. Đính kèm tiện ích (Amenities) cho từng phòng (nếu có phòng)
-            if branch["rooms"]:
-                room_ids = [str(r["room_id"]) for r in branch["rooms"]]
-                cur.execute("""
-                    SELECT ra.room_id::text, a.amenity_id, a.name, a.icon_url
-                    FROM room_amenities ra
-                    JOIN amenities a ON a.amenity_id = ra.amenity_id
-                    WHERE ra.room_id::text = ANY(%s)
-                """, (room_ids,))
-                all_amenities = cur.fetchall()
-
-                # Map tiện ích vào từng phòng tương ứng
-                for room in branch["rooms"]:
-                    room["amenities"] = [
-                        {
-                            "amenity_id": am["amenity_id"],
-                            "name": am["name"],
-                            "icon_url": am["icon_url"]
-                        } 
-                        for am in all_amenities if am["room_id"] == str(room["room_id"])
-                    ]
-
-    return branch
-        
 def update_branch(branch_id: UUID, branch_data: BranchUpdate):
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
@@ -304,7 +244,7 @@ def search_branches(keyword: str, page: int = 1, page_size: int = 10) -> dict:
 
 
 def get_active_branch_detail(branch_id: str) -> dict | None:
-    """Trả về chi tiết 1 chi nhánh hoạt động, kèm danh sách loại phòng và giá từ bảng rooms."""
+    """Trả về chi tiết 1 chi nhánh hoạt động, kèm danh sách rooms theo branch_id."""
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
@@ -334,22 +274,59 @@ def get_active_branch_detail(branch_id: str) -> dict | None:
             cur.execute(
                 """
                 SELECT
-                    rt.room_type_id,
-                    rt.name,
+                    r.room_id,
+                    r.branch_id,
+                    r.room_type_id,
+                    rt.name AS room_type_name,
                     rt.description,
-                    MIN(r.price) AS price
+                    r.price,
+                    r.people_number,
+                    r.del_flg
                 FROM rooms r
-                JOIN room_types rt ON rt.room_type_id = r.room_type_id
+                LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
                 WHERE r.branch_id = %s
                   AND r.del_flg = 0
                   AND rt.del_flg = 0
-                GROUP BY rt.room_type_id, rt.name, rt.description
-                ORDER BY rt.name;
+                ORDER BY rt.name, r.created_date, r.room_id;
                 """,
                 (branch_id,),
             )
-            room_types = cur.fetchall()
+            rooms = cur.fetchall()
+
+            room_ids = [str(room["room_id"]) for room in rooms]
+            amenities_map = {}
+
+            if room_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        ra.room_id::text AS room_id,
+                        a.name,
+                        a.icon_url
+                    FROM room_amenities ra
+                    JOIN amenities a ON a.amenity_id = ra.amenity_id
+                    WHERE ra.room_id::text = ANY(%s)
+                      AND a.del_flg = 0
+                    ORDER BY a.name;
+                    """,
+                    (room_ids,),
+                )
+                amenity_rows = cur.fetchall()
+
+                for amenity in amenity_rows:
+                    amenities_map.setdefault(amenity["room_id"], []).append(
+                        {
+                            "name": amenity["name"],
+                            "icon_url": amenity["icon_url"],
+                        }
+                    )
 
     result = dict(branch)
-    result["room_types"] = [dict(rt) for rt in room_types]
+    result["rooms"] = [
+        {
+            **dict(room),
+            "room_amenities": amenities_map.get(str(room["room_id"]), []),
+        }
+        for room in rooms
+    ]
     return result
