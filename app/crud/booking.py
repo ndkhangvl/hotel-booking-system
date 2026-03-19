@@ -187,6 +187,5 @@ def process_check_out(booking_id: str, receptionist_id: str = None):
             if updated_booking and not isinstance(updated_booking, dict):
                 columns = [desc[0] for desc in cur.description]
                 updated_booking = dict(zip(columns, updated_booking))
-                
         conn.commit()
         return updated_booking

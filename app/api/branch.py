@@ -103,15 +103,15 @@ async def read_branch_for_user(branch_id: UUID):
     return row
     
 @router.get("/{branch_id}", response_model=BranchResponse)
-async def read_branch(branch_id: UUID):
-    row = crud_branch.get_branch_by_id(branch_id)
+async def get_any_branch(branch_id: UUID):
+    row = crud_branch.get_branch_by_id(branch_id, active_only=False)
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
-    return row # Không cần map row[0], row[1] nữa
+    return row
 
-@router.delete("/{branch_id}", response_model=BranchResponse)
-async def soft_delete_branch(branch_id: UUID, current_user_id: UUID):
-    row = crud_branch.delete_branch(branch_id, current_user_id)
+@routerForUser.get("/{branch_id}", response_model=BranchResponse)
+async def get_active_branch(branch_id: UUID):
+    row = crud_branch.get_branch_by_id(branch_id, active_only=True)
     if not row:
-        raise HTTPException(status_code=404, detail="Không tìm thấy")
-    return row # Trả về trực tiếp
+        raise HTTPException(status_code=404, detail="Chi nhánh không tồn tại hoặc đã đóng cửa")
+    return row

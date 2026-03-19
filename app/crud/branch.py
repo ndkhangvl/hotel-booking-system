@@ -15,35 +15,127 @@ def create_branch(branch):
             """, (data.get('name'), data.get('address'), data.get('phone'), data.get('created_user')))
             return cur.fetchone()
 
-def get_branch_by_id(branch_id: UUID):
+def get_branch_by_id(branch_id: UUID, active_only: bool = False):
+    """
+    Lấy thông tin chi nhánh kèm theo số lượng phòng (total_rooms).
+    - active_only = True: Chỉ lấy chi nhánh del_flg=0 và CHỈ ĐẾM các phòng del_flg=0.
+    - active_only = False: Lấy chi nhánh bất kể trạng thái và ĐẾM toàn bộ phòng thuộc về nó.
+    """
     with get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur: # THÊM row_factory
-            cur.execute("SELECT * FROM branches WHERE branch_id = %s AND del_flg = 0;", (branch_id,))
-            return cur.fetchone()
+        with conn.cursor(row_factory=dict_row) as cur:
+            # 1. Định nghĩa điều kiện lọc cho chi nhánh và phòng
+            branch_filter = "AND b.del_flg = 0" if active_only else ""
+            room_filter = "AND r.del_flg = 0" if active_only else ""
 
+            # 2. Câu lệnh SQL sử dụng LEFT JOIN và COUNT
+            query = f"""
+                SELECT 
+                    b.*, 
+                    COUNT(r.room_id) AS total_rooms
+                FROM branches b
+                LEFT JOIN rooms r ON b.branch_id = r.branch_id {room_filter}
+                WHERE b.branch_id = %s {branch_filter}
+                GROUP BY b.branch_id;
+            """
+            
+            cur.execute(query, (branch_id,))
+            return cur.fetchone()
+        
+def get_branch_detail_with_rooms(branch_id: UUID, active_only: bool = False):
+    """
+    Lấy thông tin chi tiết 1 chi nhánh, 
+    bao gồm danh sách toàn bộ phòng và tiện ích của từng phòng.
+    """
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            # 1. Lấy thông tin Chi nhánh
+            branch_query = "SELECT * FROM branches WHERE branch_id = %s"
+            if active_only:
+                branch_query += " AND del_flg = 0"
+            
+            cur.execute(branch_query, (branch_id,))
+            branch = cur.fetchone()
+
+            if not branch:
+                return None
+
+            # 2. Lấy danh sách các Phòng thuộc chi nhánh này
+            room_query = """
+                SELECT r.*, rt.name AS room_type_name
+                FROM rooms r
+                LEFT JOIN room_types rt ON r.room_type_id = rt.room_type_id
+                WHERE r.branch_id = %s
+            """
+            if active_only:
+                room_query += " AND r.del_flg = 0"
+            
+            room_query += " ORDER BY r.room_number ASC"
+            cur.execute(room_query, (branch_id,))
+            rooms = cur.fetchall()
+
+            # Chuyển sang list để có thể gán thêm key 'amenities'
+            branch["rooms"] = [dict(r) for r in rooms]
+            branch["total_rooms"] = len(branch["rooms"])
+
+            # 3. Đính kèm tiện ích (Amenities) cho từng phòng (nếu có phòng)
+            if branch["rooms"]:
+                room_ids = [str(r["room_id"]) for r in branch["rooms"]]
+                cur.execute("""
+                    SELECT ra.room_id::text, a.amenity_id, a.name, a.icon_url
+                    FROM room_amenities ra
+                    JOIN amenities a ON a.amenity_id = ra.amenity_id
+                    WHERE ra.room_id::text = ANY(%s)
+                """, (room_ids,))
+                all_amenities = cur.fetchall()
+
+                # Map tiện ích vào từng phòng tương ứng
+                for room in branch["rooms"]:
+                    room["amenities"] = [
+                        {
+                            "amenity_id": am["amenity_id"],
+                            "name": am["name"],
+                            "icon_url": am["icon_url"]
+                        } 
+                        for am in all_amenities if am["room_id"] == str(room["room_id"])
+                    ]
+
+    return branch
+        
 def update_branch(branch_id: UUID, branch_data: BranchUpdate):
     with get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur: # THÊM row_factory
+        with conn.cursor(row_factory=dict_row) as cur:
+            # 1. Lấy dữ liệu cần update từ schema
             update_dict = branch_data.model_dump(exclude_unset=True)
-            if "branch_id" in update_dict: del update_dict["branch_id"]
-            if not update_dict: return None
+            if "branch_id" in update_dict: 
+                del update_dict["branch_id"]
             
+            if not update_dict: 
+                return None
+            
+            # 2. Xây dựng và thực thi lệnh UPDATE cho Chi nhánh
             query = f"UPDATE branches SET {', '.join([f'{k} = %s' for k in update_dict.keys()])}, " \
-                    f"updated_date = CURRENT_DATE, updated_time = CURRENT_TIME WHERE branch_id = %s RETURNING *;"
+                    f"updated_date = CURRENT_DATE, updated_time = CURRENT_TIME " \
+                    f"WHERE branch_id = %s RETURNING *;"
             
             params = list(update_dict.values()) + [branch_id]
             cur.execute(query, params)
-            return cur.fetchone()
+            updated_branch = cur.fetchone()
 
-def delete_branch(branch_id: UUID, user_id: UUID):
-    with get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur: # THÊM row_factory
-            cur.execute("""
-                UPDATE branches SET del_flg = 1, updated_user = %s, 
-                updated_date = CURRENT_DATE, updated_time = CURRENT_TIME
-                WHERE branch_id = %s RETURNING *;
-            """, (user_id, branch_id))
-            return cur.fetchone()
+            # 3. Logic Xóa mềm phòng quy ước del_flg = 3
+            # Chỉ thực hiện nếu bản ghi trả về có del_flg = 1
+            if updated_branch and updated_branch.get("del_flg") == 1:
+                cur.execute("""
+                    UPDATE rooms 
+                    SET del_flg = 3, 
+                        updated_date = CURRENT_DATE 
+                    WHERE branch_id = %s;
+                """, (branch_id,))
+            
+        # Commit cả 2 thao tác cùng lúc để đảm bảo tính toàn vẹn
+        conn.commit()
+        
+    return updated_branch
+        
 
 def get_initialize_stats() -> dict:
     """Trả về tổng chi nhánh, số chi nhánh hoạt động, tổng số phòng (join branches + rooms)."""
