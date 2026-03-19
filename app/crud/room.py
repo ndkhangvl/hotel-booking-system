@@ -109,25 +109,33 @@ def get_amenities() -> list:
             return cur.fetchall()
 
 
-def get_rooms_list(branch_id: str, page: int = 1, page_size: int = 10) -> dict:
-    """Trả về danh sách phòng của một chi nhánh có phân trang, kèm tên loại phòng."""
+def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, active_only: bool = False) -> dict:
+    """
+    Lấy danh sách phòng của một chi nhánh có phân trang và kèm tiện ích.
+    - active_only = True: Chỉ lấy phòng đang hoạt động (dành cho User).
+    - active_only = False: Lấy tất cả các phòng (dành cho Admin).
+    """
     offset = (page - 1) * page_size
+    
+    # Xây dựng điều kiện lọc động
+    where_clause = "WHERE r.branch_id = %s"
+    if active_only:
+        where_clause += " AND r.del_flg = 0"
 
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute("""
-                SELECT COUNT(*) AS total
-                FROM rooms
-                WHERE branch_id = %s;
-            """, (branch_id,))
+            # 1. Đếm tổng số bản ghi (Cần áp dụng cùng điều kiện lọc)
+            count_query = f"SELECT COUNT(*) AS total FROM rooms r {where_clause}"
+            cur.execute(count_query, (branch_id,))
             total = int(cur.fetchone()["total"] or 0)
 
-            cur.execute("""
+            # 2. Lấy danh sách phòng
+            select_query = f"""
                 SELECT
                     r.room_id,
                     r.branch_id,
                     r.room_type_id,
-                    rt.name          AS room_type_name,
+                    rt.name AS room_type_name,
                     r.room_number,
                     r.price,
                     r.people_number,
@@ -135,16 +143,17 @@ def get_rooms_list(branch_id: str, page: int = 1, page_size: int = 10) -> dict:
                     r.del_flg
                 FROM rooms r
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
-                WHERE r.branch_id = %s
+                {where_clause}
                 ORDER BY r.room_number
                 LIMIT %s OFFSET %s;
-            """, (branch_id, page_size, offset))
+            """
+            cur.execute(select_query, (branch_id, page_size, offset))
             rows = cur.fetchall()
 
-        # Convert to mutable dicts
+        # Chuyển thành list dict để có thể chỉnh sửa (thêm key amenities)
         rooms = [dict(r) for r in rows]
 
-        # Attach amenities for each room
+        # 3. Đính kèm tiện ích (Amenities) cho các phòng trong trang hiện tại
         if rooms:
             room_ids_str = [str(r["room_id"]) for r in rooms]
             with conn.cursor(row_factory=dict_row) as cur2:
@@ -157,6 +166,7 @@ def get_rooms_list(branch_id: str, page: int = 1, page_size: int = 10) -> dict:
                 """, (room_ids_str,))
                 amenity_rows = cur2.fetchall()
 
+            # Tạo bản đồ tiện ích theo room_id để map nhanh hơn
             amenities_map = {}
             for ar in amenity_rows:
                 rid = ar["room_id"]
@@ -168,6 +178,7 @@ def get_rooms_list(branch_id: str, page: int = 1, page_size: int = 10) -> dict:
                     "icon_url":   ar["icon_url"],
                 })
 
+            # Gán tiện ích vào từng phòng
             for room in rooms:
                 room["amenities"] = amenities_map.get(str(room["room_id"]), [])
         else:
@@ -246,3 +257,55 @@ def get_user_rooms(limit: int = 4) -> list:
             rooms = []
 
     return rooms
+
+def get_room_detail(room_id: str, active_only: bool = False) -> dict:
+    """
+    Lấy thông tin chi tiết của 1 phòng bao gồm:
+    - Thông tin cơ bản (số phòng, giá,...)
+    - Tên loại phòng (JOIN room_types)
+    - Danh sách tiện ích (JOIN amenities)
+    """
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            # 1. Lấy thông tin cơ bản của phòng và loại phòng
+            query = """
+                SELECT 
+                    r.room_id, 
+                    r.branch_id, 
+                    r.room_type_id, 
+                    rt.name AS room_type_name, 
+                    r.room_number, 
+                    r.price, 
+                    r.people_number, 
+                    r.created_date, 
+                    r.del_flg
+                FROM rooms r
+                LEFT JOIN room_types rt ON r.room_type_id = rt.room_type_id
+                WHERE r.room_id = %s
+            """
+            # Nếu là User gọi, chỉ lấy phòng chưa bị xóa
+            if active_only:
+                query += " AND r.del_flg = 0"
+            
+            cur.execute(query, (room_id,))
+            room = cur.fetchone()
+
+            if not room:
+                return None
+
+            # 2. Lấy danh sách tiện ích của phòng này
+            cur.execute("""
+                SELECT 
+                    a.amenity_id, 
+                    a.name, 
+                    a.icon_url
+                FROM room_amenities ra
+                JOIN amenities a ON a.amenity_id = ra.amenity_id
+                WHERE ra.room_id = %s
+                ORDER BY a.name;
+            """, (room_id,))
+            
+            # Gán danh sách tiện ích vào object room
+            room["amenities"] = cur.fetchall()
+
+    return room
