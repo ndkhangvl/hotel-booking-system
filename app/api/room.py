@@ -4,6 +4,7 @@ from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeRe
 from app.crud import room as crud_room
 
 router = APIRouter(prefix="/admin/rooms", tags=["Admin - Rooms"])
+routerAmenities = APIRouter(prefix="/user", tags=["User - Amenities"])
 routerForUser = APIRouter(prefix="/user/rooms", tags=["User - Rooms"])
 
 
@@ -38,7 +39,7 @@ async def initialize(
         raise HTTPException(status_code=500, detail=f"Lỗi lấy thống kê phòng: {e}")
 
 
-@router.get("/amenities", response_model=List[AmenityResponse])
+@routerAmenities.get("/amenities", response_model=List[AmenityResponse])
 async def amenities():
     """
     Trả về danh sách tất cả tiện ích đang hoạt động.
@@ -73,7 +74,7 @@ async def rooms_for_user(
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
 
 
-@routerForUser.get("/room-types", response_model=List[RoomTypeResponse])
+@routerAmenities.get("/room-types", response_model=List[RoomTypeResponse])
 async def room_types_for_user(
     limit: int = Query(default=4, ge=1, le=20, description="Số loại phòng cần lấy"),
 ):
