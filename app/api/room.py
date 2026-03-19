@@ -4,7 +4,8 @@ from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeRe
 from app.crud import room as crud_room
 
 router = APIRouter(prefix="/admin/rooms", tags=["Admin - Rooms"])
-routerForUser = APIRouter(prefix="/user", tags=["User - Amenities"])
+routerAmenities = APIRouter(prefix="/user", tags=["User - Amenities"])
+routerForUser = APIRouter(prefix="/user/rooms", tags=["User - Rooms"])
 
 
 @router.post("", status_code=200)
@@ -38,7 +39,7 @@ async def initialize(
         raise HTTPException(status_code=500, detail=f"Lỗi lấy thống kê phòng: {e}")
 
 
-@router.get("/amenities", response_model=List[AmenityResponse])
+@routerAmenities.get("/amenities", response_model=List[AmenityResponse])
 async def amenities():
     """
     Trả về danh sách tất cả tiện ích đang hoạt động.
@@ -73,7 +74,7 @@ async def rooms_for_user(
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
 
 
-@routerForUser.get("/room-types", response_model=List[RoomTypeResponse])
+@routerAmenities.get("/room-types", response_model=List[RoomTypeResponse])
 async def room_types_for_user(
     limit: int = Query(default=4, ge=1, le=20, description="Số loại phòng cần lấy"),
 ):
@@ -109,6 +110,28 @@ async def rooms_list(
     Kèm tên loại phòng (JOIN room_types).
     """
     try:
-        return crud_room.get_rooms_list(branch_id=branch_id, page=page, page_size=page_size)
+        return crud_room.get_rooms_by_branch(branch_id, page, page_size, active_only=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
+
+@routerForUser.get("/rooms-list", response_model=RoomListResponse)
+async def user_get_active_rooms_by_branch(
+    branch_id: str, page: int = 1, page_size: int = 10
+    ):
+    return crud_room.get_rooms_by_branch(branch_id, page, page_size, active_only=True)
+
+@router.get("/{room_id}")
+async def admin_get_room_info(room_id: str):
+    """[ADMIN] Lấy thông tin chi tiết phòng (kể cả phòng đã xóa)"""
+    room = crud_room.get_room_detail(room_id, active_only=False)
+    if not room:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phòng")
+    return room
+
+@routerForUser.get("/{room_id}")
+async def user_get_room_info(room_id: str):
+    """[USER] Lấy thông tin phòng (chỉ phòng đang hoạt động)"""
+    room = crud_room.get_room_detail(room_id, active_only=True)
+    if not room:
+        raise HTTPException(status_code=404, detail="Phòng không tồn tại hoặc đã ngừng hoạt động")
+    return room
