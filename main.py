@@ -6,6 +6,8 @@ from app.api import user
 from app.api import booking
 from app.api import branch
 from app.api import room
+from app.api import room_image
+
 app = FastAPI(title="FastAPI + CockroachDB + MongoDB")
 
 app.add_middleware(
@@ -58,4 +60,4 @@ app.include_router(room.routerForUser)
 app.include_router(room.routerAmenities)
 app.include_router(booking.routerReceptionist)
 app.include_router(booking.routerAdmin)
-
+app.include_router(room_image.router)
