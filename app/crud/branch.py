@@ -103,69 +103,39 @@ def get_branch_detail_with_rooms(branch_id: UUID, active_only: bool = False):
         
 def update_branch(branch_id: UUID, branch_data: BranchUpdate):
     with get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur: # THÊM row_factory
+        with conn.cursor(row_factory=dict_row) as cur:
+            # 1. Lấy dữ liệu cần update từ schema
             update_dict = branch_data.model_dump(exclude_unset=True)
-            if "branch_id" in update_dict: del update_dict["branch_id"]
-            if not update_dict: return None
+            if "branch_id" in update_dict: 
+                del update_dict["branch_id"]
             
+            if not update_dict: 
+                return None
+            
+            # 2. Xây dựng và thực thi lệnh UPDATE cho Chi nhánh
             query = f"UPDATE branches SET {', '.join([f'{k} = %s' for k in update_dict.keys()])}, " \
-                    f"updated_date = CURRENT_DATE, updated_time = CURRENT_TIME WHERE branch_id = %s RETURNING *;"
+                    f"updated_date = CURRENT_DATE, updated_time = CURRENT_TIME " \
+                    f"WHERE branch_id = %s RETURNING *;"
             
             params = list(update_dict.values()) + [branch_id]
             cur.execute(query, params)
-            return cur.fetchone()
-        
-def delete_branch(branch_id: UUID):
-    """
-    Thực hiện Soft Delete chi nhánh và TẤT CẢ các phòng thuộc chi nhánh đó.
-    """
-    with get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            # 1. Xóa mềm tất cả các phòng thuộc chi nhánh này trước
-            cur.execute("""
-                UPDATE rooms 
-                SET del_flg = 1, 
-                    updated_date = CURRENT_DATE
-                WHERE branch_id = %s;
-            """, (branch_id,))
+            updated_branch = cur.fetchone()
 
-            # 2. Xóa mềm chi nhánh
-            cur.execute("""
-                UPDATE branches 
-                SET del_flg = 1, 
-                    updated_date = CURRENT_DATE, 
-                    updated_time = CURRENT_TIME
-                WHERE branch_id = %s 
-                RETURNING *;
-            """, (branch_id,))
+            # 3. Logic Xóa mềm phòng quy ước del_flg = 3
+            # Chỉ thực hiện nếu bản ghi trả về có del_flg = 1
+            if updated_branch and updated_branch.get("del_flg") == 1:
+                cur.execute("""
+                    UPDATE rooms 
+                    SET del_flg = 3, 
+                        updated_date = CURRENT_DATE 
+                    WHERE branch_id = %s;
+                """, (branch_id,))
             
-            deleted_branch = cur.fetchone()
-            
-        # Commit cả hai thay đổi cùng lúc
+        # Commit cả 2 thao tác cùng lúc để đảm bảo tính toàn vẹn
         conn.commit()
         
-    return deleted_branch
-
-def restore_branch(branch_id: UUID):
-    """
-    Khôi phục chi nhánh (del_flg = 0).
-    Lưu ý: Các phòng thuộc chi nhánh này vẫn giữ nguyên del_flg = 1.
-    """
-    with get_connection() as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute("""
-                UPDATE branches 
-                SET del_flg = 0, 
-                    updated_date = CURRENT_DATE, 
-                    updated_time = CURRENT_TIME
-                WHERE branch_id = %s 
-                RETURNING *;
-            """, (branch_id,))
-            
-            restored_branch = cur.fetchone()
-        conn.commit()
+    return updated_branch
         
-    return restored_branch
 
 def get_initialize_stats() -> dict:
     """Trả về tổng chi nhánh, số chi nhánh hoạt động, tổng số phòng (join branches + rooms)."""
