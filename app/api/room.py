@@ -49,6 +49,15 @@ async def amenities():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách tiện ích: {e}")
 
+@router.get("/amenities", response_model=List[AmenityResponse])
+async def amenities_for_admin():
+    """
+    Trả về danh sách tiện ích cho trang người dùng.
+    """
+    try:
+        return crud_room.get_amenities()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách tiện ích: {e}")
 
 @routerForUser.get("/amenities", response_model=List[AmenityResponse])
 async def amenities_for_user():
