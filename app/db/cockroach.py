@@ -43,6 +43,120 @@ def create_database_if_not_exists():
         print("❌ Lỗi tạo database:", e)
 
 
+def _column_exists(cur, table_name: str, column_name: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = %s
+          AND column_name = %s
+        LIMIT 1;
+        """,
+        (table_name, column_name),
+    )
+    return cur.fetchone() is not None
+
+
+def migrate_legacy_schema():
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS branch_rooms (
+                        branch_room_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        branch_id UUID NOT NULL,
+                        room_id UUID NOT NULL,
+                        room_number VARCHAR(20) NOT NULL,
+                        created_date DATE DEFAULT CURRENT_DATE,
+                        created_time TIME DEFAULT CURRENT_TIME,
+                        created_user UUID,
+                        updated_date DATE,
+                        updated_time TIME,
+                        updated_user UUID,
+                        del_flg SMALLINT DEFAULT 0,
+
+                        CONSTRAINT fk_branch_rooms_branch
+                            FOREIGN KEY (branch_id) REFERENCES branches(branch_id),
+                        CONSTRAINT fk_branch_rooms_room
+                            FOREIGN KEY (room_id) REFERENCES rooms(room_id),
+                        CONSTRAINT uq_branch_room_number
+                            UNIQUE (branch_id, room_number)
+                    );
+                    """
+                )
+
+                if _column_exists(cur, "rooms", "room_number"):
+                    cur.execute("ALTER TABLE rooms DROP COLUMN room_number;")
+
+                cur.execute(
+                    """
+                    INSERT INTO branch_rooms (
+                        branch_id,
+                        room_id,
+                        room_number,
+                        created_date,
+                        created_time,
+                        created_user,
+                        updated_date,
+                        updated_time,
+                        updated_user,
+                        del_flg
+                    )
+                    SELECT
+                        src.branch_id,
+                        src.room_id,
+                        CAST(100 + src.seq AS STRING),
+                        src.created_date,
+                        src.created_time,
+                        src.created_user,
+                        src.updated_date,
+                        src.updated_time,
+                        src.updated_user,
+                        src.del_flg
+                    FROM (
+                        SELECT
+                            r.branch_id,
+                            r.room_id,
+                            r.created_date,
+                            r.created_time,
+                            r.created_user,
+                            r.updated_date,
+                            r.updated_time,
+                            r.updated_user,
+                            r.del_flg,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY r.branch_id
+                                ORDER BY r.created_date, r.room_id
+                            ) AS seq
+                        FROM rooms r
+                    ) AS src
+                    LEFT JOIN branch_rooms br ON br.room_id = src.room_id
+                    WHERE br.branch_room_id IS NULL;
+                    """
+                )
+
+                has_booking_room_id = _column_exists(cur, "bookings", "room_id")
+
+                if not has_booking_room_id:
+                    cur.execute("ALTER TABLE bookings ADD COLUMN room_id UUID;")
+
+                cur.execute("ALTER TABLE bookings DROP CONSTRAINT IF EXISTS fk_bookings_room;")
+                cur.execute(
+                    """
+                    ALTER TABLE bookings
+                    ADD CONSTRAINT fk_bookings_room
+                    FOREIGN KEY (room_id) REFERENCES rooms(room_id);
+                    """
+                )
+
+            conn.commit()
+        print("✅ Đồng bộ schema cũ sang schema mới thành công")
+    except Exception as e:
+        print("❌ Lỗi migrate schema:", e)
+
+
 def create_all_tables():
     tables = [
         ("users", """
@@ -114,7 +228,6 @@ def create_all_tables():
             room_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             branch_id UUID NOT NULL,
             room_type_id UUID NOT NULL,
-            room_number VARCHAR(20) NOT NULL,
             price DECIMAL(10, 2) NOT NULL,
             people_number INT NOT NULL,
             created_date DATE DEFAULT CURRENT_DATE,
@@ -129,6 +242,29 @@ def create_all_tables():
                 FOREIGN KEY (branch_id) REFERENCES branches(branch_id),
             CONSTRAINT fk_rooms_room_type
                 FOREIGN KEY (room_type_id) REFERENCES room_types(room_type_id)
+        );
+        """),
+
+        ("branch_rooms", """
+        CREATE TABLE IF NOT EXISTS branch_rooms (
+            branch_room_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            branch_id UUID NOT NULL,
+            room_id UUID NOT NULL,
+            room_number VARCHAR(20) NOT NULL,
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
+            created_user UUID,
+            updated_date DATE,
+            updated_time TIME,
+            updated_user UUID,
+            del_flg SMALLINT DEFAULT 0,
+
+            CONSTRAINT fk_branch_rooms_branch
+                FOREIGN KEY (branch_id) REFERENCES branches(branch_id),
+            CONSTRAINT fk_branch_rooms_room
+                FOREIGN KEY (room_id) REFERENCES rooms(room_id),
+            CONSTRAINT uq_branch_room_number
+                UNIQUE (branch_id, room_number)
         );
         """),
 
@@ -243,6 +379,7 @@ def create_all_tables():
                     cur.execute(ddl)
                     print(f"✅ Tạo bảng {table_name} thành công")
             conn.commit()
+        migrate_legacy_schema()
         print("🎉 Tạo toàn bộ bảng thành công")
     except Exception as e:
         print("❌ Lỗi tạo bảng:", e)
@@ -301,93 +438,69 @@ def seed_basic_hotel_data():
         -- Tài khoản Khách vãng lai (Guest)
         ('e5000000-0000-0000-0000-000000000005', 'Khách Vãng Lai', 'guest1@gmail.com', '0905678901', 'hashed_password_guest', 'Guest', CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);"""
 
-        """INSERT INTO rooms (
-            room_id, branch_id, room_type_id, room_number, price, people_number,
+        """WITH room_seed AS (
+            SELECT *
+            FROM (VALUES
+                ('b2000000-0000-0000-0000-000000000001'::UUID, 450000.00::DECIMAL(10, 2), 2, 2),
+                ('b2000000-0000-0000-0000-000000000002'::UUID, 620000.00::DECIMAL(10, 2), 2, 3),
+                ('b2000000-0000-0000-0000-000000000003'::UUID, 820000.00::DECIMAL(10, 2), 2, 2),
+                ('b2000000-0000-0000-0000-000000000004'::UUID, 1000000.00::DECIMAL(10, 2), 4, 2),
+                ('b2000000-0000-0000-0000-000000000005'::UUID, 1450000.00::DECIMAL(10, 2), 2, 1)
+            ) AS s(room_type_id, price, people_number, copies)
+        ),
+        inserted_rooms AS (
+            INSERT INTO rooms (
+                room_id, branch_id, room_type_id, price, people_number,
+                created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
+            )
+            SELECT
+                gen_random_uuid(),
+                b.branch_id,
+                s.room_type_id,
+                s.price,
+                s.people_number,
+                CURRENT_DATE,
+                CURRENT_TIME,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                0
+            FROM branches b
+            CROSS JOIN room_seed s
+            CROSS JOIN generate_series(1, s.copies)
+            RETURNING room_id, branch_id, created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
+        ),
+        numbered_rooms AS (
+            SELECT
+                room_id,
+                branch_id,
+                created_date,
+                created_time,
+                created_user,
+                updated_date,
+                updated_time,
+                updated_user,
+                del_flg,
+                ROW_NUMBER() OVER (PARTITION BY branch_id ORDER BY room_id) AS seq
+            FROM inserted_rooms
+        )
+        INSERT INTO branch_rooms (
+            branch_id, room_id, room_number,
             created_date, created_time, created_user, updated_date, updated_time, updated_user, del_flg
-        ) VALUES
-        -- Aurora Vĩnh Long
-        ('d4000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000001', '101', 450000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000001', '102', 450000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000002', '103', 600000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000004', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000002', '104', 600000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000005', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000002', '105', 620000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000006', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000003', '201', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000007', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000003', '202', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000008', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000004', '203', 900000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000009', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000004', '204', 900000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000010', 'a1000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000005', '301', 1300000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-
-        -- Aurora An Giang
-        ('d4000000-0000-0000-0000-000000000011', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000001', '101', 480000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000012', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000001', '102', 480000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000013', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000002', '103', 630000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000014', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000002', '104', 630000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000015', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000002', '105', 650000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000016', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000003', '201', 800000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000017', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000003', '202', 800000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000018', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000004', '203', 980000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000019', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000004', '204', 980000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000020', 'a1000000-0000-0000-0000-000000000002', 'b2000000-0000-0000-0000-000000000005', '301', 1450000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-
-        -- Aurora Cần Thơ
-        ('d4000000-0000-0000-0000-000000000021', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000001', '101', 550000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000022', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000001', '102', 550000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000023', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000002', '103', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000024', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000002', '104', 750000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000025', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000002', '105', 780000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000026', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000003', '201', 950000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000027', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000003', '202', 950000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000028', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000004', '203', 1200000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000029', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000004', '204', 1200000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000030', 'a1000000-0000-0000-0000-000000000003', 'b2000000-0000-0000-0000-000000000005', '301', 1800000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-
-        -- Aurora Sóc Trăng
-        ('d4000000-0000-0000-0000-000000000031', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000001', '101', 460000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000032', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000001', '102', 460000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000033', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000002', '103', 620000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000034', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000002', '104', 620000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000035', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000002', '105', 640000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000036', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000003', '201', 780000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000037', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000003', '202', 780000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000038', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000004', '203', 950000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000039', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000004', '204', 950000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000040', 'a1000000-0000-0000-0000-000000000004', 'b2000000-0000-0000-0000-000000000005', '301', 1380000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-
-        -- Aurora Bạc Liêu
-        ('d4000000-0000-0000-0000-000000000041', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000001', '101', 470000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000042', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000001', '102', 470000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000043', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000002', '103', 640000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000044', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000002', '104', 640000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000045', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000002', '105', 660000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000046', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000003', '201', 820000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000047', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000003', '202', 820000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000048', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000004', '203', 1000000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000049', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000004', '204', 1000000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000050', 'a1000000-0000-0000-0000-000000000005', 'b2000000-0000-0000-0000-000000000005', '301', 1420000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-
-        -- Aurora Cà Mau
-        ('d4000000-0000-0000-0000-000000000051', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000001', '101', 490000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000052', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000001', '102', 490000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000053', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000002', '103', 660000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000054', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000002', '104', 660000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000055', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000002', '105', 680000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000056', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000003', '201', 840000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000057', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000003', '202', 840000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000058', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000004', '203', 1020000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000059', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000004', '204', 1020000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000060', 'a1000000-0000-0000-0000-000000000006', 'b2000000-0000-0000-0000-000000000005', '301', 1480000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-
-        -- Aurora Trà Vinh
-        ('d4000000-0000-0000-0000-000000000061', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000001', '101', 455000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000062', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000001', '102', 455000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000063', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000002', '103', 615000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000064', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000002', '104', 615000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000065', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000002', '105', 635000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000066', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000003', '201', 770000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000067', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000003', '202', 770000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000068', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000004', '203', 940000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000069', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000004', '204', 940000.00, 4, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0),
-        ('d4000000-0000-0000-0000-000000000070', 'a1000000-0000-0000-0000-000000000007', 'b2000000-0000-0000-0000-000000000005', '301', 1360000.00, 2, CURRENT_DATE, CURRENT_TIME, NULL, NULL, NULL, NULL, 0);"""
+        )
+        SELECT
+            branch_id,
+            room_id,
+            CAST(100 + seq AS STRING),
+            created_date,
+            created_time,
+            created_user,
+            updated_date,
+            updated_time,
+            updated_user,
+            del_flg
+        FROM numbered_rooms;"""
     ]
 
     try:

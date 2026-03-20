@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from datetime import date, time
 from uuid import UUID
 from typing import List, Optional
+from decimal import Decimal
 
 class BranchBase(BaseModel):
     name: str = Field(..., max_length=100)
@@ -45,3 +46,31 @@ class BranchInitializeResponse(BaseModel):
     total_branches: int
     active_branches: int
     total_rooms: int
+
+
+class BranchRoomTypePriceResponse(BaseModel):
+    room_type_id: UUID
+    name: str
+    description: Optional[str] = None
+    price: Decimal
+
+
+class BranchRoomAmenityResponse(BaseModel):
+    name: str
+    icon_url: Optional[str] = None
+
+
+class BranchRoomDetailResponse(BaseModel):
+    room_id: UUID
+    branch_id: UUID
+    room_type_id: Optional[UUID] = None
+    room_type_name: Optional[str] = None
+    description: Optional[str] = None
+    price: Decimal
+    people_number: int
+    del_flg: int
+    room_amenities: List[BranchRoomAmenityResponse] = []
+
+
+class BranchDetailResponse(BranchResponse):
+    rooms: List[BranchRoomDetailResponse] = []

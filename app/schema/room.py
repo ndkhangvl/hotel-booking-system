@@ -19,11 +19,14 @@ class RoomResponse(BaseModel):
     branch_id: UUID
     room_type_id: Optional[UUID] = None
     room_type_name: Optional[str] = None
-    room_number: str
     price: Decimal
     people_number: int
     created_date: Optional[date] = None
     del_flg: int
+    available_rooms: int = 0
+    booked_rooms: int = 0
+    in_use_rooms: int = 0
+    unavailable_rooms: int = 0
     amenities: List[AmenityResponse] = []
 
     class Config:
@@ -38,10 +41,45 @@ class RoomListResponse(BaseModel):
     total_pages: int
 
 
+class BranchRoomResponse(BaseModel):
+    branch_room_id: UUID
+    branch_id: UUID
+    room_id: UUID
+    room_number: str
+    room_type_id: Optional[UUID] = None
+    room_type_name: Optional[str] = None
+    del_flg: int
+
+    class Config:
+        from_attributes = True
+
+
+class BranchRoomListResponse(BaseModel):
+    items: List[BranchRoomResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class BranchRoomUpsertRequest(BaseModel):
+    branch_room_id: Optional[UUID] = None
+    branch_id: UUID
+    room_id: UUID
+    room_number: str
+    del_flg: int = 0
+
+
+class BranchRoomDeleteRequest(BaseModel):
+    branch_room_id: UUID
+
+
 class RoomInitializeResponse(BaseModel):
     total_rooms: int
     available_rooms: int
-    occupied_rooms: int
+    booked_rooms: int
+    in_use_rooms: int
+    unavailable_rooms: int
 
 
 class RoomTypeResponse(BaseModel):
@@ -54,10 +92,9 @@ class RoomTypeResponse(BaseModel):
 
 
 class RoomUpsertRequest(BaseModel):
-    room_id: Optional[UUID] = None          # None => insert, có giá trị => update
+    room_id: Optional[UUID] = None
     branch_id: UUID
     room_type_id: Optional[UUID] = None
-    room_number: str
     price: Optional[Decimal] = None
     people_number: Optional[int] = 1
     del_flg: int = 0                        # 0: còn trống, 1: đã đặt, 2: đang sử dụng, 3: không sử dụng
