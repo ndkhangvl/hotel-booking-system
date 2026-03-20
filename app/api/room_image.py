@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Form, File, UploadFile
 
 from app.schema.room_image import (
     RoomImageCreate,
@@ -19,6 +19,7 @@ from app.crud.room_image import (
     set_thumbnail,
     reorder_room_image,
 )
+from app.core.google_drive import upload_file_to_drive
 
 router = APIRouter(prefix="/room-images", tags=["Room Images"])
 
@@ -29,11 +30,40 @@ async def create_room_image_api(payload: RoomImageCreate):
     return doc
 
 
-@router.get("/{image_id}", response_model=RoomImageResponse)
-async def get_room_image_api(image_id: str):
-    doc = await get_room_image_by_id(image_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Room image not found")
+@router.post("/upload", response_model=RoomImageResponse, status_code=status.HTTP_201_CREATED)
+async def upload_room_image_api(
+    branch_room_id: str = Form(...),
+    room_id: str = Form(...),
+    branch_id: str = Form(...),
+    is_thumbnail: bool = Form(False),
+    sort_order: int = Form(1),
+    created_user: str | None = Form(None),
+    file: UploadFile = File(...),
+):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File phải là ảnh")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="File rỗng")
+
+    image_url = upload_file_to_drive(
+        file_bytes=file_bytes,
+        filename=file.filename or "room-image.jpg",
+        content_type=file.content_type,
+    )
+
+    payload = RoomImageCreate(
+        branch_room_id=branch_room_id,
+        room_id=room_id,
+        branch_id=branch_id,
+        image_url=image_url,
+        is_thumbnail=is_thumbnail,
+        sort_order=sort_order,
+        created_user=created_user,
+    )
+
+    doc = await create_room_image(payload)
     return doc
 
 
@@ -47,6 +77,14 @@ async def get_room_images_api(branch_room_id: str):
 async def get_room_images_by_room_api(room_id: str):
     docs = await get_room_images_by_room_id(room_id)
     return {"items": docs}
+
+
+@router.get("/{image_id}", response_model=RoomImageResponse)
+async def get_room_image_api(image_id: str):
+    doc = await get_room_image_by_id(image_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Room image not found")
+    return doc
 
 
 @router.put("/{image_id}", response_model=RoomImageResponse)
