@@ -1,3 +1,4 @@
+from datetime import date
 from fastapi import APIRouter, HTTPException, Query
 from typing import List
 from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeResponse, AmenityResponse, RoomUpsertRequest, RoomResponse, BranchRoomListResponse, BranchRoomUpsertRequest, BranchRoomDeleteRequest
@@ -26,6 +27,8 @@ async def upsert_room(body: RoomUpsertRequest):
 @router.get("/initialize", response_model=RoomInitializeResponse)
 async def initialize(
     branch_id: str = Query(..., description="UUID của chi nhánh"),
+    start_date: date | None = Query(default=None, description="Ngày bắt đầu xem trạng thái phòng"),
+    end_date: date | None = Query(default=None, description="Ngày kết thúc xem trạng thái phòng"),
 ):
     """
     Trả về thống kê tổng quan phòng của một chi nhánh:
@@ -34,7 +37,7 @@ async def initialize(
     - Số phòng không hoạt động (del_flg != 0)
     """
     try:
-        return crud_room.get_initialize_stats(branch_id=branch_id)
+        return crud_room.get_initialize_stats(branch_id=branch_id, start_date=start_date, end_date=end_date)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy thống kê phòng: {e}")
 
@@ -111,6 +114,8 @@ async def room_types():
 @router.get("/rooms-list", response_model=RoomListResponse)
 async def rooms_list(
     branch_id: str = Query(..., description="UUID của chi nhánh"),
+    start_date: date | None = Query(default=None, description="Ngày bắt đầu xem trạng thái phòng"),
+    end_date: date | None = Query(default=None, description="Ngày kết thúc xem trạng thái phòng"),
     page: int = Query(default=1, ge=1, description="Số trang (bắt đầu từ 1)"),
     page_size: int = Query(default=10, ge=1, le=100, description="Số bản ghi mỗi trang"),
 ):
@@ -119,7 +124,7 @@ async def rooms_list(
     Kèm tên loại phòng (JOIN room_types).
     """
     try:
-        return crud_room.get_rooms_by_branch(branch_id, page, page_size, active_only=False)
+        return crud_room.get_rooms_by_branch(branch_id, page, page_size, active_only=False, start_date=start_date, end_date=end_date)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
 
@@ -127,11 +132,13 @@ async def rooms_list(
 @router.get("/branch-rooms-list", response_model=BranchRoomListResponse)
 async def branch_rooms_list(
     branch_id: str = Query(..., description="UUID của chi nhánh"),
+    start_date: date | None = Query(default=None, description="Ngày bắt đầu xem trạng thái phòng"),
+    end_date: date | None = Query(default=None, description="Ngày kết thúc xem trạng thái phòng"),
     page: int = Query(default=1, ge=1, description="Số trang (bắt đầu từ 1)"),
     page_size: int = Query(default=10, ge=1, le=100, description="Số bản ghi mỗi trang"),
 ):
     try:
-        return crud_room.get_branch_rooms_by_branch(branch_id, page, page_size)
+        return crud_room.get_branch_rooms_by_branch(branch_id, page, page_size, start_date=start_date, end_date=end_date)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách branch rooms: {e}")
 

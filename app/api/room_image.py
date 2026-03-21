@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Form, File, UploadFile
+from psycopg.rows import dict_row
 
+from app.db.cockroach import get_connection
 from app.schema.room_image import (
     RoomImageCreate,
     RoomImageUpdate,
@@ -24,6 +26,32 @@ from app.core.google_drive import upload_file_to_drive
 router = APIRouter(prefix="/room-images", tags=["Room Images"])
 
 
+def _resolve_branch_room_id(branch_room_id: str | None, room_id: str, branch_id: str) -> str:
+    if branch_room_id:
+        return branch_room_id
+
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT branch_room_id::text AS branch_room_id
+                FROM branch_rooms
+                WHERE branch_id = %s
+                  AND room_id = %s
+                  AND del_flg = 0
+                ORDER BY room_number, branch_room_id
+                LIMIT 1;
+                """,
+                (branch_id, room_id),
+            )
+            branch_room = cur.fetchone()
+
+    if not branch_room:
+        raise HTTPException(status_code=400, detail="Không tìm thấy phòng chi nhánh phù hợp để gắn ảnh")
+
+    return branch_room["branch_room_id"]
+
+
 @router.post("/", response_model=RoomImageResponse, status_code=status.HTTP_201_CREATED)
 async def create_room_image_api(payload: RoomImageCreate):
     doc = await create_room_image(payload)
@@ -32,7 +60,7 @@ async def create_room_image_api(payload: RoomImageCreate):
 
 @router.post("/upload", response_model=RoomImageResponse, status_code=status.HTTP_201_CREATED)
 async def upload_room_image_api(
-    branch_room_id: str = Form(...),
+    branch_room_id: str | None = Form(None),
     room_id: str = Form(...),
     branch_id: str = Form(...),
     is_thumbnail: bool = Form(False),
@@ -53,8 +81,10 @@ async def upload_room_image_api(
         content_type=file.content_type,
     )
 
+    resolved_branch_room_id = _resolve_branch_room_id(branch_room_id, room_id, branch_id)
+
     payload = RoomImageCreate(
-        branch_room_id=branch_room_id,
+        branch_room_id=resolved_branch_room_id,
         room_id=room_id,
         branch_id=branch_id,
         image_url=image_url,

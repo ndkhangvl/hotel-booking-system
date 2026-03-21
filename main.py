@@ -7,6 +7,7 @@ from app.api import booking
 from app.api import branch
 from app.api import room
 from app.api import room_image
+from app.utils.email_queue import start_email_queue_worker, stop_email_queue_worker
 
 app = FastAPI(title="FastAPI + CockroachDB + MongoDB")
 
@@ -26,6 +27,12 @@ async def on_startup():
     test_cockroach_connection()
     await connect_mongo()
     await test_mongo_connection()
+    start_email_queue_worker()
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await stop_email_queue_worker()
 
 @app.post("/initialize-db")
 async def initialize_db():

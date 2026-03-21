@@ -11,18 +11,36 @@ class BookingStatus(str, Enum):
     COMPLETED = 'Completed'
     CANCELLED = 'Cancelled'
 
+
+class PaymentStatus(str, Enum):
+    UNPAID = 'unpaid'
+    PAID = 'paid'
+
 class BookingBase(BaseModel):
-    user_id: UUID
-    room_id: UUID
-    voucher_code: Optional[str] = None
+    user_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    branch_room_id: Optional[UUID] = None
+    room_id: Optional[UUID] = None
+    voucher_code: Optional[str] = Field(None, max_length=20)
+    customer_name: str = Field(..., max_length=100)
+    customer_email: str = Field(..., max_length=150)
+    customer_phonenumber: str = Field(..., max_length=15)
+    note: Optional[str] = None
     from_date: date
     to_date: date
 
 class BookingCreate(BookingBase):
-    pass
+    total_price: Optional[float] = Field(None, ge=0)
+
+
+class BookingAdminCreate(BookingBase):
+    total_price: Optional[float] = Field(None, ge=0)
+    status: BookingStatus = BookingStatus.PENDING
+    payment_status: PaymentStatus = PaymentStatus.UNPAID
 
 class BookingResponse(BookingBase):
     booking_id: UUID
+    booking_code: Optional[str] = None
     total_price: float
     status: BookingStatus
     
@@ -38,10 +56,25 @@ class BookingResponse(BookingBase):
     class Config:
         from_attributes = True
 
+
+class BookingAdminResponse(BookingResponse):
+    branch_name: Optional[str] = None
+    room_type_name: Optional[str] = None
+    room_number: Optional[str] = None
+    payment_status: PaymentStatus = PaymentStatus.UNPAID
+
 class BookingAdminUpdate(BaseModel):
-    status: Optional[BookingStatus] = None
+    user_id: Optional[UUID] = None
+    branch_id: Optional[UUID] = None
+    branch_room_id: Optional[UUID] = None
     room_id: Optional[UUID] = None
+    status: Optional[BookingStatus] = None
+    payment_status: Optional[PaymentStatus] = None
     voucher_code: Optional[str] = None
+    customer_name: Optional[str] = Field(None, max_length=100)
+    customer_email: Optional[str] = Field(None, max_length=150)
+    customer_phonenumber: Optional[str] = Field(None, max_length=15)
+    note: Optional[str] = None
     from_date: Optional[date] = None
     to_date: Optional[date] = None
     total_price: Optional[float] = Field(None, ge=0)
