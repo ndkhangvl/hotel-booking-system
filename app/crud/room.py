@@ -49,7 +49,7 @@ def upsert_room(data: dict) -> str:
     Trả về room_id dạng str.
     """
     room_id   = data.get("room_id")
-    branch_id = str(data["branch_id"])
+    branch_code = str(data["branch_code"])
     room_type_id  = str(data["room_type_id"]) if data.get("room_type_id") else None
     price         = data.get("price")
     people_number = data.get("people_number") or 1
@@ -62,25 +62,25 @@ def upsert_room(data: dict) -> str:
             if room_id is None:
                 cur.execute("""
                     INSERT INTO rooms
-                        (branch_id, room_type_id, price, people_number,
+                        (branch_code, room_type_id, price, people_number,
                          created_date, del_flg)
                     VALUES (%s, %s, %s, %s, %s, 0)
                     RETURNING room_id;
-                """, (branch_id, room_type_id, price, people_number, today))
+                """, (branch_code, room_type_id, price, people_number, today))
                 row = cur.fetchone()
                 result_id = str(row["room_id"])
             else:
                 result_id = str(room_id)
                 cur.execute("""
                     UPDATE rooms
-                    SET branch_id     = %s,
+                    SET branch_code     = %s,
                         room_type_id  = %s,
                         price         = %s,
                         people_number = %s,
                         del_flg       = %s,
                         updated_date  = %s
                     WHERE room_id = %s;
-                """, (branch_id, room_type_id, price, people_number, del_flg, today, result_id))
+                """, (branch_code, room_type_id, price, people_number, del_flg, today, result_id))
 
             cur.execute("DELETE FROM room_amenities WHERE room_id = %s;", (result_id,))
             if amenity_ids:
@@ -94,7 +94,7 @@ def upsert_room(data: dict) -> str:
     return result_id
 
 
-def get_initialize_stats(branch_id: str) -> dict:
+def get_initialize_stats(branch_code: str) -> dict:
     """Trả về thống kê branch rooms của một chi nhánh: tổng, còn trống, không còn trống."""
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
@@ -106,8 +106,8 @@ def get_initialize_stats(branch_id: str) -> dict:
                     SUM(CASE WHEN del_flg = 2 THEN 1 ELSE 0 END)         AS in_use_rooms,
                     SUM(CASE WHEN del_flg = 3 THEN 1 ELSE 0 END)         AS unavailable_rooms
                 FROM branch_rooms
-                WHERE branch_id = %s;
-            """, (branch_id,))
+                WHERE branch_code = %s;
+            """, (branch_code,))
             stats = cur.fetchone()
 
     return {
@@ -145,7 +145,7 @@ def get_amenities() -> list:
             return cur.fetchall()
 
 
-def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, active_only: bool = False) -> dict:
+def get_rooms_by_branch(branch_code: str, page: int = 1, page_size: int = 10, active_only: bool = False) -> dict:
     """
     Lấy danh sách phòng của một chi nhánh có phân trang và kèm tiện ích.
     - active_only = True: Chỉ lấy phòng đang hoạt động (dành cho User).
@@ -154,20 +154,20 @@ def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, acti
     offset = (page - 1) * page_size
     
     # Xây dựng điều kiện lọc động
-    where_clause = "WHERE r.branch_id = %s"
+    where_clause = "WHERE r.branch_code = %s"
     if active_only:
         where_clause += " AND r.del_flg = 0"
 
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             count_query = f"SELECT COUNT(*) AS total FROM rooms r {where_clause}"
-            cur.execute(count_query, (branch_id,))
+            cur.execute(count_query, (branch_code,))
             total = int(cur.fetchone()["total"] or 0)
 
             select_query = f"""
                 SELECT
                     r.room_id,
-                    r.branch_id,
+                    r.branch_code,
                     r.room_type_id,
                     rt.name AS room_type_name,
                     r.price,
@@ -182,20 +182,20 @@ def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, acti
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
                 LEFT JOIN (
                     SELECT
-                        branch_id,
+                        branch_code,
                         room_id,
                         SUM(CASE WHEN del_flg = 0 THEN 1 ELSE 0 END) AS available_rooms,
                         SUM(CASE WHEN del_flg = 1 THEN 1 ELSE 0 END) AS booked_rooms,
                         SUM(CASE WHEN del_flg = 2 THEN 1 ELSE 0 END) AS in_use_rooms,
                         SUM(CASE WHEN del_flg = 3 THEN 1 ELSE 0 END) AS unavailable_rooms
                     FROM branch_rooms
-                    GROUP BY branch_id, room_id
-                ) br_stats ON br_stats.branch_id = r.branch_id AND br_stats.room_id = r.room_id
+                    GROUP BY branch_code, room_id
+                ) br_stats ON br_stats.branch_code = r.branch_code AND br_stats.room_id = r.room_id
                 {where_clause}
                 ORDER BY r.created_date, r.room_id
                 LIMIT %s OFFSET %s;
             """
-            cur.execute(select_query, (branch_id, page_size, offset))
+            cur.execute(select_query, (branch_code, page_size, offset))
             rows = cur.fetchall()
 
         rooms = [dict(r) for r in rows]
@@ -213,7 +213,7 @@ def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, acti
     }
 
 
-def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10) -> dict:
+def get_branch_rooms_by_branch(branch_code: str, page: int = 1, page_size: int = 10) -> dict:
     offset = (page - 1) * page_size
 
     with get_connection() as conn:
@@ -222,9 +222,9 @@ def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 1
                 """
                 SELECT COUNT(*) AS total
                 FROM branch_rooms br
-                WHERE br.branch_id = %s;
+                WHERE br.branch_code = %s;
                 """,
-                (branch_id,),
+                (branch_code,),
             )
             total = int(cur.fetchone()["total"] or 0)
 
@@ -232,7 +232,7 @@ def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 1
                 """
                 SELECT
                     br.branch_room_id,
-                    br.branch_id,
+                    br.branch_code,
                     br.room_id,
                     br.room_number,
                     r.room_type_id,
@@ -241,11 +241,11 @@ def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 1
                 FROM branch_rooms br
                 JOIN rooms r ON r.room_id = br.room_id
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
-                WHERE br.branch_id = %s
+                WHERE br.branch_code = %s
                 ORDER BY br.room_number, br.branch_room_id
                 LIMIT %s OFFSET %s;
                 """,
-                (branch_id, page_size, offset),
+                (branch_code, page_size, offset),
             )
             items = cur.fetchall()
 
@@ -260,7 +260,7 @@ def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 1
 
 def upsert_branch_room(data: dict) -> str:
     branch_room_id = data.get("branch_room_id")
-    branch_id = str(data["branch_id"])
+    branch_code = str(data["branch_code"])
     room_id = str(data["room_id"])
     room_number = str(data["room_number"]).strip()
     del_flg = int(data.get("del_flg", 0))
@@ -272,8 +272,8 @@ def upsert_branch_room(data: dict) -> str:
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                "SELECT room_id FROM rooms WHERE room_id = %s AND branch_id = %s;",
-                (room_id, branch_id),
+                "SELECT room_id FROM rooms WHERE room_id = %s AND branch_code = %s;",
+                (room_id, branch_code),
             )
             room = cur.fetchone()
             if not room:
@@ -283,12 +283,12 @@ def upsert_branch_room(data: dict) -> str:
                 cur.execute(
                     """
                     INSERT INTO branch_rooms (
-                        branch_id, room_id, room_number, created_date, del_flg
+                        branch_code, room_id, room_number, created_date, del_flg
                     )
                     VALUES (%s, %s, %s, %s, %s)
                     RETURNING branch_room_id;
                     """,
-                    (branch_id, room_id, room_number, today, del_flg),
+                    (branch_code, room_id, room_number, today, del_flg),
                 )
                 row = cur.fetchone()
                 result_id = str(row["branch_room_id"])
@@ -301,10 +301,10 @@ def upsert_branch_room(data: dict) -> str:
                         room_number = %s,
                         del_flg = %s,
                         updated_date = %s
-                    WHERE branch_room_id = %s AND branch_id = %s
+                    WHERE branch_room_id = %s AND branch_code = %s
                     RETURNING branch_room_id;
                     """,
-                    (room_id, room_number, del_flg, today, result_id, branch_id),
+                    (room_id, room_number, del_flg, today, result_id, branch_code),
                 )
                 row = cur.fetchone()
                 if not row:
@@ -315,13 +315,13 @@ def upsert_branch_room(data: dict) -> str:
     return result_id
 
 
-def delete_branch_room(branch_room_id: str, branch_id: str | None = None) -> bool:
+def delete_branch_room(branch_room_id: str, branch_code: str | None = None) -> bool:
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            if branch_id:
+            if branch_code:
                 cur.execute(
-                    "DELETE FROM branch_rooms WHERE branch_room_id = %s AND branch_id = %s RETURNING branch_room_id;",
-                    (branch_room_id, branch_id),
+                    "DELETE FROM branch_rooms WHERE branch_room_id = %s AND branch_code = %s RETURNING branch_room_id;",
+                    (branch_room_id, branch_code),
                 )
             else:
                 cur.execute(
@@ -343,7 +343,7 @@ def get_user_rooms(limit: int = 4) -> list:
                 """
                 SELECT
                     r.room_id,
-                    r.branch_id,
+                    r.branch_code,
                     r.room_type_id,
                     rt.name AS room_type_name,
                     r.price,
@@ -378,7 +378,7 @@ def get_room_detail(room_id: str, active_only: bool = False) -> dict:
             query = """
                 SELECT 
                     r.room_id,
-                    r.branch_id,
+                    r.branch_code,
                     r.room_type_id, 
                     rt.name AS room_type_name, 
                     r.price, 

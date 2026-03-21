@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List
-from uuid import UUID
 from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchPaginationResponse, BranchInitializeResponse, BranchDetailResponse
 from app.crud import branch as crud_branch
 
@@ -37,7 +36,7 @@ async def branches_list(
 def map_branch_row(row):
     if not row: return None
     return {
-        "branch_id": row[0], "name": row[1], "address": row[2], "phone": row[3],
+        "branch_code": row[0], "name": row[1], "address": row[2], "phone": row[3],
         "created_date": row[4], "created_time": row[5], "created_user": row[6],
         "updated_date": row[7], "updated_time": row[8], "updated_user": row[9],
         "del_flg": row[10]
@@ -46,8 +45,8 @@ def map_branch_row(row):
 @router.post("/", response_model=BranchResponse)
 async def upsert_branch(branch_data: BranchUpdate):
     try:
-        if branch_data.branch_id:
-            row = crud_branch.update_branch(branch_data.branch_id, branch_data)
+        if branch_data.branch_code:
+            row = crud_branch.update_branch(branch_data.branch_code, branch_data)
             action = "cập nhật"
         else:
             if not branch_data.name or not branch_data.address:
@@ -95,16 +94,16 @@ async def search_branches_api(
         raise HTTPException(status_code=500, detail="Lỗi khi tìm kiếm chi nhánh")
 
 
-@routerForUser.get("/{branch_id}", response_model=BranchDetailResponse)
-async def read_branch_for_user(branch_id: UUID):
-    row = crud_branch.get_active_branch_detail(str(branch_id))
+@routerForUser.get("/{branch_code}", response_model=BranchDetailResponse)
+async def read_branch_for_user(branch_code: str):
+    row = crud_branch.get_active_branch_detail(branch_code)
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
     return row
     
-@router.get("/{branch_id}", response_model=BranchResponse)
-async def get_any_branch(branch_id: UUID):
-    row = crud_branch.get_branch_by_id(branch_id, active_only=False)
+@router.get("/{branch_code}", response_model=BranchResponse)
+async def get_any_branch(branch_code: str):
+    row = crud_branch.get_branch_by_id(branch_code, active_only=False)
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy chi nhánh")
     return row

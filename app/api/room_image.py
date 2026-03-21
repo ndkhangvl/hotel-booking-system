@@ -34,7 +34,7 @@ async def create_room_image_api(payload: RoomImageCreate):
 async def upload_room_image_api(
     branch_room_id: str = Form(...),
     room_id: str = Form(...),
-    branch_id: str = Form(...),
+    branch_code: str = Form(...),
     is_thumbnail: bool = Form(False),
     sort_order: int = Form(1),
     created_user: str | None = Form(None),
@@ -56,7 +56,7 @@ async def upload_room_image_api(
     payload = RoomImageCreate(
         branch_room_id=branch_room_id,
         room_id=room_id,
-        branch_id=branch_id,
+        branch_code=branch_code,
         image_url=image_url,
         is_thumbnail=is_thumbnail,
         sort_order=sort_order,

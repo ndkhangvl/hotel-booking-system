@@ -50,7 +50,7 @@ async def create_room_image(data: RoomImageCreate) -> dict:
         "_id": str(uuid4()),
         "branch_room_id": data.branch_room_id,
         "room_id": data.room_id,
-        "branch_id": data.branch_id,
+        "branch_code": data.branch_code,
         "image_url": str(data.image_url),
         "is_thumbnail": data.is_thumbnail,
         "sort_order": data.sort_order,

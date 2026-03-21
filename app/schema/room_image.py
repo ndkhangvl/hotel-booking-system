@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, HttpUrl
 class RoomImageBase(BaseModel):
     branch_room_id: str = Field(..., min_length=1, max_length=100)
     room_id: str = Field(..., min_length=1, max_length=100)
-    branch_id: str = Field(..., min_length=1, max_length=100)
+    branch_code: str = Field(..., min_length=1, max_length=100)
     image_url: HttpUrl
     is_thumbnail: bool = False
     sort_order: int = Field(default=1, ge=1)
@@ -26,7 +26,7 @@ class RoomImageResponse(BaseModel):
     id: str = Field(alias="_id")
     branch_room_id: str
     room_id: str
-    branch_id: str
+    branch_code: str
     image_url: str
     is_thumbnail: bool
     sort_order: int

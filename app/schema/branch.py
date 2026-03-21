@@ -13,7 +13,7 @@ class BranchCreate(BranchBase):
     created_user: Optional[UUID] = None
 
 class BranchUpdate(BaseModel):
-    branch_id: Optional[UUID] = None
+    branch_code: Optional[str] = None
     name: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
@@ -21,7 +21,7 @@ class BranchUpdate(BaseModel):
     del_flg: int
 
 class BranchResponse(BranchBase):
-    branch_id: UUID
+    branch_code: str
     created_date: Optional[date] = None
     created_time: Optional[time] = None
     created_user: Optional[UUID] = None
@@ -62,7 +62,7 @@ class BranchRoomAmenityResponse(BaseModel):
 
 class BranchRoomDetailResponse(BaseModel):
     room_id: UUID
-    branch_id: UUID
+    branch_code: str
     room_type_id: Optional[UUID] = None
     room_type_name: Optional[str] = None
     description: Optional[str] = None

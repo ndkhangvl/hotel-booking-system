@@ -15,7 +15,7 @@ def create_branch(branch):
             """, (data.get('name'), data.get('address'), data.get('phone'), data.get('created_user')))
             return cur.fetchone()
 
-def get_branch_by_id(branch_id: UUID, active_only: bool = False):
+def get_branch_by_id(branch_code: UUID, active_only: bool = False):
     """
     Lấy thông tin chi nhánh kèm theo số lượng phòng (total_rooms).
     - active_only = True: Chỉ lấy chi nhánh del_flg=0 và CHỈ ĐẾM các phòng del_flg=0.
@@ -33,21 +33,21 @@ def get_branch_by_id(branch_id: UUID, active_only: bool = False):
                     b.*, 
                     COUNT(r.room_id) AS total_rooms
                 FROM branches b
-                LEFT JOIN rooms r ON b.branch_id = r.branch_id {room_filter}
-                WHERE b.branch_id = %s {branch_filter}
-                GROUP BY b.branch_id;
+                LEFT JOIN rooms r ON b.branch_code = r.branch_code {room_filter}
+                WHERE b.branch_code = %s {branch_filter}
+                GROUP BY b.branch_code;
             """
             
-            cur.execute(query, (branch_id,))
+            cur.execute(query, (branch_code,))
             return cur.fetchone()
         
-def update_branch(branch_id: UUID, branch_data: BranchUpdate):
+def update_branch(branch_code: UUID, branch_data: BranchUpdate):
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             # 1. Lấy dữ liệu cần update từ schema
             update_dict = branch_data.model_dump(exclude_unset=True)
-            if "branch_id" in update_dict: 
-                del update_dict["branch_id"]
+            if "branch_code" in update_dict: 
+                del update_dict["branch_code"]
             
             if not update_dict: 
                 return None
@@ -55,9 +55,9 @@ def update_branch(branch_id: UUID, branch_data: BranchUpdate):
             # 2. Xây dựng và thực thi lệnh UPDATE cho Chi nhánh
             query = f"UPDATE branches SET {', '.join([f'{k} = %s' for k in update_dict.keys()])}, " \
                     f"updated_date = CURRENT_DATE, updated_time = CURRENT_TIME " \
-                    f"WHERE branch_id = %s RETURNING *;"
+                    f"WHERE branch_code = %s RETURNING *;"
             
-            params = list(update_dict.values()) + [branch_id]
+            params = list(update_dict.values()) + [branch_code]
             cur.execute(query, params)
             updated_branch = cur.fetchone()
 
@@ -68,8 +68,8 @@ def update_branch(branch_id: UUID, branch_data: BranchUpdate):
                     UPDATE rooms 
                     SET del_flg = 3, 
                         updated_date = CURRENT_DATE 
-                    WHERE branch_id = %s;
-                """, (branch_id,))
+                    WHERE branch_code = %s;
+                """, (branch_code,))
             
         # Commit cả 2 thao tác cùng lúc để đảm bảo tính toàn vẹn
         conn.commit()
@@ -92,7 +92,7 @@ def get_initialize_stats() -> dict:
             cur.execute("""
                 SELECT COUNT(r.room_id) AS total_rooms
                 FROM rooms r
-                JOIN branches b ON r.branch_id = b.branch_id
+                JOIN branches b ON r.branch_code = b.branch_code
                 WHERE r.del_flg = 0 AND b.del_flg = 0;
             """)
             room_stats = cur.fetchone()
@@ -116,15 +116,15 @@ def get_branches_list(page: int = 1, page_size: int = 10) -> dict:
             # 2. Lấy danh sách (Bổ sung đủ các cột để map vào BranchResponse)
             cur.execute("""
                 SELECT 
-                    b.branch_id, b.name, b.address, b.phone, 
+                    b.branch_code, b.name, b.address, b.phone, 
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg,
                     COUNT(r.room_id) AS total_rooms
                 FROM branches b
-                LEFT JOIN rooms r ON r.branch_id = b.branch_id AND r.del_flg = 0
+                LEFT JOIN rooms r ON r.branch_code = b.branch_code AND r.del_flg = 0
                 GROUP BY 
-                    b.branch_id, b.name, b.address, b.phone, 
+                    b.branch_code, b.name, b.address, b.phone, 
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg
@@ -165,16 +165,16 @@ def get_all_active_branches(page: int = 1, page_size: int = 10) -> dict:
             # 2. Lấy danh sách
             cur.execute("""
                 SELECT 
-                    b.branch_id, b.name, b.address, b.phone, 
+                    b.branch_code, b.name, b.address, b.phone, 
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg,
                     COUNT(r.room_id) AS total_rooms
                 FROM branches b
-                LEFT JOIN rooms r ON r.branch_id = b.branch_id AND r.del_flg = 0
+                LEFT JOIN rooms r ON r.branch_code = b.branch_code AND r.del_flg = 0
                 WHERE b.del_flg = 0 -- SỬA Ở ĐÂY: Thêm b. vào trước del_flg
                 GROUP BY 
-                    b.branch_id, b.name, b.address, b.phone, 
+                    b.branch_code, b.name, b.address, b.phone, 
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg
@@ -214,17 +214,17 @@ def search_branches(keyword: str, page: int = 1, page_size: int = 10) -> dict:
             # Lưu ý: %s xuất hiện 2 lần cho tìm kiếm, sau đó là LIMIT và OFFSET
             items_query = """
                 SELECT 
-                    b.branch_id, b.name, b.address, b.phone, 
+                    b.branch_code, b.name, b.address, b.phone, 
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg,
                     COUNT(r.room_id) AS total_rooms
                 FROM branches b
-                LEFT JOIN rooms r ON r.branch_id = b.branch_id AND r.del_flg = 0
+                LEFT JOIN rooms r ON r.branch_code = b.branch_code AND r.del_flg = 0
                 WHERE b.del_flg = 0 
                 AND (b.name ILIKE %s OR b.address ILIKE %s)
                 GROUP BY 
-                    b.branch_id, b.name, b.address, b.phone, 
+                    b.branch_code, b.name, b.address, b.phone, 
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg
@@ -243,28 +243,28 @@ def search_branches(keyword: str, page: int = 1, page_size: int = 10) -> dict:
     }
 
 
-def get_active_branch_detail(branch_id: str) -> dict | None:
-    """Trả về chi tiết 1 chi nhánh hoạt động, kèm danh sách rooms theo branch_id."""
+def get_active_branch_detail(branch_code: str) -> dict | None:
+    """Trả về chi tiết 1 chi nhánh hoạt động, kèm danh sách rooms theo branch_code."""
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 """
                 SELECT
-                    b.branch_id, b.name, b.address, b.phone,
+                    b.branch_code, b.name, b.address, b.phone,
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg,
                     COUNT(r.room_id) AS total_rooms
                 FROM branches b
-                LEFT JOIN rooms r ON r.branch_id = b.branch_id AND r.del_flg = 0
-                WHERE b.branch_id = %s AND b.del_flg = 0
+                LEFT JOIN rooms r ON r.branch_code = b.branch_code AND r.del_flg = 0
+                WHERE b.branch_code = %s AND b.del_flg = 0
                 GROUP BY
-                    b.branch_id, b.name, b.address, b.phone,
+                    b.branch_code, b.name, b.address, b.phone,
                     b.created_date, b.created_time, b.created_user,
                     b.updated_date, b.updated_time, b.updated_user,
                     b.del_flg;
                 """,
-                (branch_id,),
+                (branch_code,),
             )
             branch = cur.fetchone()
 
@@ -275,7 +275,7 @@ def get_active_branch_detail(branch_id: str) -> dict | None:
                 """
                 SELECT
                     r.room_id,
-                    r.branch_id,
+                    r.branch_code,
                     r.room_type_id,
                     rt.name AS room_type_name,
                     rt.description,
@@ -284,12 +284,12 @@ def get_active_branch_detail(branch_id: str) -> dict | None:
                     r.del_flg
                 FROM rooms r
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
-                WHERE r.branch_id = %s
+                WHERE r.branch_code = %s
                   AND r.del_flg = 0
                   AND rt.del_flg = 0
                 ORDER BY rt.name, r.created_date, r.room_id;
                 """,
-                (branch_id,),
+                (branch_code,),
             )
             rooms = cur.fetchall()
 

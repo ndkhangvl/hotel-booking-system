@@ -103,7 +103,7 @@ async def insert_room(room_data: dict) -> str:
 async def insert_sample_room_data():
     sample_room = {
         "_id": "uuid-room-001",
-        "branch_id": "uuid-branch-001",
+        "branch_code": "uuid-branch-001",
         "branch_name": "Chi nhánh Hà Nội",
         "room_type_name": "Deluxe",
         "price": {"$numberDecimal": "1200000"},

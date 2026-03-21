@@ -16,7 +16,7 @@ class AmenityResponse(BaseModel):
 
 class RoomResponse(BaseModel):
     room_id: UUID
-    branch_id: UUID
+    branch_code: str
     room_type_id: Optional[UUID] = None
     room_type_name: Optional[str] = None
     price: Decimal
@@ -43,7 +43,7 @@ class RoomListResponse(BaseModel):
 
 class BranchRoomResponse(BaseModel):
     branch_room_id: UUID
-    branch_id: UUID
+    branch_code: str
     room_id: UUID
     room_number: str
     room_type_id: Optional[UUID] = None
@@ -64,7 +64,7 @@ class BranchRoomListResponse(BaseModel):
 
 class BranchRoomUpsertRequest(BaseModel):
     branch_room_id: Optional[UUID] = None
-    branch_id: UUID
+    branch_code: str
     room_id: UUID
     room_number: str
     del_flg: int = 0
@@ -93,7 +93,7 @@ class RoomTypeResponse(BaseModel):
 
 class RoomUpsertRequest(BaseModel):
     room_id: Optional[UUID] = None
-    branch_id: UUID
+    branch_code: str
     room_type_id: Optional[UUID] = None
     price: Optional[Decimal] = None
     people_number: Optional[int] = 1

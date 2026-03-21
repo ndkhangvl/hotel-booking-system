@@ -25,7 +25,7 @@ async def upsert_room(body: RoomUpsertRequest):
 
 @router.get("/initialize", response_model=RoomInitializeResponse)
 async def initialize(
-    branch_id: str = Query(..., description="UUID của chi nhánh"),
+    branch_code: str = Query(..., description="UUID của chi nhánh"),
 ):
     """
     Trả về thống kê tổng quan phòng của một chi nhánh:
@@ -34,7 +34,7 @@ async def initialize(
     - Số phòng không hoạt động (del_flg != 0)
     """
     try:
-        return crud_room.get_initialize_stats(branch_id=branch_id)
+        return crud_room.get_initialize_stats(branch_code=branch_code)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy thống kê phòng: {e}")
 
@@ -110,7 +110,7 @@ async def room_types():
 
 @router.get("/rooms-list", response_model=RoomListResponse)
 async def rooms_list(
-    branch_id: str = Query(..., description="UUID của chi nhánh"),
+    branch_code: str = Query(..., description="UUID của chi nhánh"),
     page: int = Query(default=1, ge=1, description="Số trang (bắt đầu từ 1)"),
     page_size: int = Query(default=10, ge=1, le=100, description="Số bản ghi mỗi trang"),
 ):
@@ -119,19 +119,19 @@ async def rooms_list(
     Kèm tên loại phòng (JOIN room_types).
     """
     try:
-        return crud_room.get_rooms_by_branch(branch_id, page, page_size, active_only=False)
+        return crud_room.get_rooms_by_branch(branch_code, page, page_size, active_only=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
 
 
 @router.get("/branch-rooms-list", response_model=BranchRoomListResponse)
 async def branch_rooms_list(
-    branch_id: str = Query(..., description="UUID của chi nhánh"),
+    branch_code: str = Query(..., description="UUID của chi nhánh"),
     page: int = Query(default=1, ge=1, description="Số trang (bắt đầu từ 1)"),
     page_size: int = Query(default=10, ge=1, le=100, description="Số bản ghi mỗi trang"),
 ):
     try:
-        return crud_room.get_branch_rooms_by_branch(branch_id, page, page_size)
+        return crud_room.get_branch_rooms_by_branch(branch_code, page, page_size)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách branch rooms: {e}")
 
@@ -146,17 +146,17 @@ async def upsert_branch_room(body: BranchRoomUpsertRequest):
 
 
 @router.delete("/branch-rooms", status_code=200)
-async def remove_branch_room(body: BranchRoomDeleteRequest, branch_id: str = Query(..., description="UUID của chi nhánh")):
-    deleted = crud_room.delete_branch_room(str(body.branch_room_id), branch_id=branch_id)
+async def remove_branch_room(body: BranchRoomDeleteRequest, branch_code: str = Query(..., description="UUID của chi nhánh")):
+    deleted = crud_room.delete_branch_room(str(body.branch_room_id), branch_code=branch_code)
     if not deleted:
         raise HTTPException(status_code=404, detail="Không tìm thấy branch room")
     return {"success": True}
 
 @routerForUser.get("/rooms-list", response_model=RoomListResponse)
 async def user_get_active_rooms_by_branch(
-    branch_id: str, page: int = 1, page_size: int = 10
+    branch_code: str, page: int = 1, page_size: int = 10
     ):
-    return crud_room.get_rooms_by_branch(branch_id, page, page_size, active_only=True)
+    return crud_room.get_rooms_by_branch(branch_code, page, page_size, active_only=True)
 
 @router.get("/{room_id}")
 async def admin_get_room_info(room_id: str):
