@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List
 from app.schema.branch import BranchCreate, BranchResponse, BranchUpdate, BranchPaginationResponse, BranchInitializeResponse, BranchDetailResponse
 from app.crud import branch as crud_branch
+from app.crud.audit import log_audit_event
 
 router = APIRouter(prefix="/admin/branches", tags=["Admin - Branches"])
 routerForUser = APIRouter(prefix="/user/branches", tags=["User - Branches"])
@@ -57,8 +58,20 @@ async def upsert_branch(branch_data: BranchUpdate):
         if not row:
             raise HTTPException(status_code=404, detail=f"Không thể {action} chi nhánh")
         
+        await log_audit_event(
+            action="UPDATE" if branch_data.branch_code else "CREATE",
+            entity_type="branch",
+            source_table="branches",
+            entity_pk={"branch_code": row["branch_code"]},
+            branch_code=row["branch_code"],
+            actor_role="Admin",
+            endpoint="/admin/branches/",
+            method="POST",
+            message=f"{action.capitalize()} chi nhánh thành công"
+        )
+
         # Vì row đã là Dict (do dict_row), trả về luôn!
-        return row 
+        return row
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -22,6 +22,7 @@ from app.crud.room_image import (
     reorder_room_image,
 )
 from app.core.google_drive import upload_file_to_drive
+from app.crud.audit import log_audit_event
 
 router = APIRouter(prefix="/room-images", tags=["Room Images"])
 
@@ -55,6 +56,20 @@ def _resolve_branch_room_id(branch_room_id: str | None, room_id: str, branch_cod
 @router.post("/", response_model=RoomImageResponse, status_code=status.HTTP_201_CREATED)
 async def create_room_image_api(payload: RoomImageCreate):
     doc = await create_room_image(payload)
+    
+    await log_audit_event(
+        action="CREATE",
+        entity_type="room_image",
+        source_table="room_images",
+        entity_pk={"room_image_id": str(getattr(doc, "room_image_id", ""))},
+        branch_code=payload.branch_code,
+        actor_id=payload.created_user,
+        actor_role="Admin",
+        endpoint="/room-images/",
+        method="POST",
+        message="Thêm ảnh phòng thành công"
+    )
+    
     return doc
 
 
@@ -94,6 +109,20 @@ async def upload_room_image_api(
     )
 
     doc = await create_room_image(payload)
+    
+    await log_audit_event(
+        action="CREATE",
+        entity_type="room_image",
+        source_table="room_images",
+        entity_pk={"room_image_id": str(getattr(doc, "room_image_id", ""))},
+        branch_code=branch_code,
+        actor_id=created_user,
+        actor_role="Admin",
+        endpoint="/room-images/upload",
+        method="POST",
+        message="Tải lên ảnh phòng thành công"
+    )
+    
     return doc
 
 
@@ -122,6 +151,19 @@ async def update_room_image_api(image_id: str, payload: RoomImageUpdate):
     doc = await update_room_image(image_id, payload)
     if not doc:
         raise HTTPException(status_code=404, detail="Room image not found")
+        
+    await log_audit_event(
+        action="UPDATE",
+        entity_type="room_image",
+        source_table="room_images",
+        entity_pk={"room_image_id": image_id},
+        branch_code=doc.branch_code if isinstance(doc, dict) else getattr(doc, "branch_code", None),
+        actor_role="Admin",
+        endpoint=f"/room-images/{image_id}",
+        method="PUT",
+        message="Cập nhật ảnh phòng thành công"
+    )
+    
     return doc
 
 
@@ -130,6 +172,21 @@ async def set_thumbnail_api(image_id: str, payload: SetThumbnailRequest):
     doc = await set_thumbnail(image_id=image_id, updated_user=payload.updated_user)
     if not doc:
         raise HTTPException(status_code=404, detail="Room image not found")
+        
+    await log_audit_event(
+        action="UPDATE",
+        entity_type="room_image",
+        source_table="room_images",
+        entity_pk={"room_image_id": image_id},
+        branch_code=doc.branch_code if isinstance(doc, dict) else getattr(doc, "branch_code", None),
+        actor_id=payload.updated_user,
+        actor_role="Admin",
+        endpoint=f"/room-images/{image_id}/thumbnail",
+        method="PATCH",
+        reason="Đặt thumbnail",
+        message="Đặt ảnh nền phòng thành công"
+    )
+    
     return doc
 
 
@@ -142,6 +199,21 @@ async def reorder_room_image_api(image_id: str, payload: ReorderRoomImageRequest
     )
     if not doc:
         raise HTTPException(status_code=404, detail="Room image not found")
+        
+    await log_audit_event(
+        action="UPDATE",
+        entity_type="room_image",
+        source_table="room_images",
+        entity_pk={"room_image_id": image_id},
+        branch_code=doc.branch_code if isinstance(doc, dict) else getattr(doc, "branch_code", None),
+        actor_id=payload.updated_user,
+        actor_role="Admin",
+        endpoint=f"/room-images/{image_id}/reorder",
+        method="PATCH",
+        reason="Đổi thứ tự ảnh",
+        message="Đổi thứ tự ảnh phòng thành công"
+    )
+        
     return doc
 
 
@@ -150,6 +222,19 @@ async def delete_room_image_api(image_id: str, updated_user: str | None = None):
     success = await soft_delete_room_image(image_id=image_id, updated_user=updated_user)
     if not success:
         raise HTTPException(status_code=404, detail="Room image not found")
+
+    await log_audit_event(
+        action="DELETE",
+        entity_type="room_image",
+        source_table="room_images",
+        entity_pk={"room_image_id": image_id},
+        actor_id=updated_user,
+        actor_role="Admin",
+        endpoint=f"/room-images/{image_id}",
+        method="DELETE",
+        reason="Xóa ảnh",
+        message="Room image deleted successfully"
+    )
 
     return {
         "success": True,

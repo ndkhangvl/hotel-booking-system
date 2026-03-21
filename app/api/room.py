@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import List
 from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeResponse, AmenityResponse, RoomUpsertRequest, RoomResponse, BranchRoomListResponse, BranchRoomUpsertRequest, BranchRoomDeleteRequest
 from app.crud import room as crud_room
+from app.crud.audit import log_audit_event
 
 router = APIRouter(prefix="/admin/rooms", tags=["Admin - Rooms"])
 routerAmenities = APIRouter(prefix="/user", tags=["User - Amenities"])
@@ -19,6 +20,19 @@ async def upsert_room(body: RoomUpsertRequest):
     """
     try:
         room_id = crud_room.upsert_room(body.model_dump())
+        
+        await log_audit_event(
+            action="UPDATE" if body.room_id else "CREATE",
+            entity_type="room",
+            source_table="rooms",
+            entity_pk={"room_id": str(room_id)},
+            branch_code=body.branch_code,
+            actor_role="Admin",
+            endpoint="/admin/rooms",
+            method="POST",
+            message="Upsert phòng thành công"
+        )
+        
         return {"room_id": room_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lưu phòng: {e}")
@@ -147,6 +161,19 @@ async def branch_rooms_list(
 async def upsert_branch_room(body: BranchRoomUpsertRequest):
     try:
         branch_room_id = crud_room.upsert_branch_room(body.model_dump())
+        
+        await log_audit_event(
+            action="UPDATE" if body.branch_room_id else "CREATE",
+            entity_type="branch_room",
+            source_table="branch_rooms",
+            entity_pk={"branch_room_id": str(branch_room_id)},
+            branch_code=body.branch_code,
+            actor_role="Admin",
+            endpoint="/admin/rooms/branch-rooms",
+            method="POST",
+            message="Upsert chi nhánh phòng thành công"
+        )
+        
         return {"branch_room_id": branch_room_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lưu branch room: {e}")
@@ -157,6 +184,19 @@ async def remove_branch_room(body: BranchRoomDeleteRequest, branch_code: str = Q
     deleted = crud_room.delete_branch_room(str(body.branch_room_id), branch_code=branch_code)
     if not deleted:
         raise HTTPException(status_code=404, detail="Không tìm thấy branch room")
+        
+    await log_audit_event(
+        action="DELETE",
+        entity_type="branch_room",
+        source_table="branch_rooms",
+        entity_pk={"branch_room_id": str(body.branch_room_id)},
+        branch_code=branch_code,
+        actor_role="Admin",
+        endpoint="/admin/rooms/branch-rooms",
+        method="DELETE",
+        message="Xóa chi nhánh phòng thành công"
+    )
+
     return {"success": True}
 
 @routerForUser.get("/rooms-list", response_model=RoomListResponse)
