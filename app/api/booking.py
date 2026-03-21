@@ -1,11 +1,8 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from typing import List
-from app.schema.booking import BookingCreate, BookingResponse, BookingAdminUpdate
+from app.schema.booking import BookingAdminCreate, BookingCreate, BookingResponse, BookingAdminResponse, BookingAdminUpdate
 from app.crud import booking as crud_booking
-# Giả sử bạn có hàm gửi mail ở đây
-# from app.utils.email import send_confirm_email 
-# Giả sử bạn có hàm lấy email user ở đây
-from app.crud import user as crud_user 
+from app.utils.email_queue import enqueue_booking_confirmation_email
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 routerReceptionist = APIRouter(prefix="/Receptionist/bookings", tags=["receptionist - Bookings"])
@@ -14,7 +11,9 @@ routerAdmin = APIRouter(prefix="/Admin/bookings", tags=["Admin - Bookings"])
 @router.post("/user/", response_model=BookingResponse)
 async def create_new_booking(booking: BookingCreate):
     try:
-        return crud_booking.create_booking(booking)
+        created_booking = crud_booking.create_booking(booking)
+        await enqueue_booking_confirmation_email(created_booking)
+        return created_booking
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi tạo booking: {e}")
 
@@ -26,20 +25,31 @@ async def read_bookings_for_receptionist():
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi lấy danh sách booking: {e}")
 
+
+@routerAdmin.get("/", response_model=List[BookingAdminResponse])
+async def read_bookings_for_admin():
+    try:
+        return crud_booking.get_all_bookings_with_details()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lỗi lấy danh sách booking admin: {e}")
+
+
+@routerAdmin.post("/", response_model=BookingResponse)
+async def create_booking_admin(booking: BookingAdminCreate):
+    try:
+        created_booking = crud_booking.create_booking(booking)
+        await enqueue_booking_confirmation_email(created_booking)
+        return created_booking
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lỗi tạo booking admin: {e}")
+
 @routerReceptionist.post("/{booking_id}/confirm", response_model=BookingResponse)
-async def confirm_booking_api(booking_id: str, background_tasks: BackgroundTasks):
+async def confirm_booking_api(booking_id: str):
     try:
         updated_booking = crud_booking.confirm_booking(booking_id)
         if not updated_booking:
             raise HTTPException(status_code=400, detail="Không thể Xác nhận. Đơn không ở trạng thái Pending.")
-        
-        # LOGIC GỬI MAIL:
-        # Lấy email của khách hàng dựa trên user_id trong booking
-        customer = crud_user.get_user_by_id(updated_booking['user_id'])
-        if customer and customer.get('email'):
-            # Thêm việc gửi mail vào hàng đợi chạy ngầm
-            background_tasks.add_task(send_confirm_email, customer['email'], updated_booking)
-            
+
         return updated_booking
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi xác nhận booking: {e}")

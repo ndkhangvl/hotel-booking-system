@@ -146,10 +146,20 @@ def migrate_legacy_schema():
                     """
                 )
 
-                has_booking_room_id = _column_exists(cur, "bookings", "room_id")
+                booking_columns = {
+                    "branch_room_id": "UUID",
+                    "booking_code": "VARCHAR(32)",
+                    "voucher_code": "VARCHAR(20)",
+                    "customer_name": "VARCHAR(100)",
+                    "customer_email": "VARCHAR(150)",
+                    "customer_phonenumber": "VARCHAR(15)",
+                    "note": "STRING",
+                    "room_id": "UUID",
+                }
 
-                if not has_booking_room_id:
-                    cur.execute("ALTER TABLE bookings ADD COLUMN room_id UUID;")
+                for column_name, column_type in booking_columns.items():
+                    if not _column_exists(cur, "bookings", column_name):
+                        cur.execute(f"ALTER TABLE bookings ADD COLUMN {column_name} {column_type};")
 
                 cur.execute("ALTER TABLE bookings DROP CONSTRAINT IF EXISTS fk_bookings_room;")
                 cur.execute(
@@ -246,7 +256,9 @@ def create_all_tables():
             updated_date DATE,
             updated_time TIME,
             updated_user UUID,
-            del_flg SMALLINT DEFAULT 0
+            del_flg SMALLINT DEFAULT 0,
+            room_id UUID,
+            CONSTRAINT fk_bookings_room FOREIGN KEY (room_id) REFERENCES rooms(room_id)
         );
         """),
 
