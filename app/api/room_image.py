@@ -26,7 +26,7 @@ from app.core.google_drive import upload_file_to_drive
 router = APIRouter(prefix="/room-images", tags=["Room Images"])
 
 
-def _resolve_branch_room_id(branch_room_id: str | None, room_id: str, branch_id: str) -> str:
+def _resolve_branch_room_id(branch_room_id: str | None, room_id: str, branch_code: str) -> str:
     if branch_room_id:
         return branch_room_id
 
@@ -36,13 +36,13 @@ def _resolve_branch_room_id(branch_room_id: str | None, room_id: str, branch_id:
                 """
                 SELECT branch_room_id::text AS branch_room_id
                 FROM branch_rooms
-                WHERE branch_id = %s
+                WHERE branch_code = %s
                   AND room_id = %s
                   AND del_flg = 0
                 ORDER BY room_number, branch_room_id
                 LIMIT 1;
                 """,
-                (branch_id, room_id),
+                (branch_code, room_id),
             )
             branch_room = cur.fetchone()
 
@@ -81,7 +81,7 @@ async def upload_room_image_api(
         content_type=file.content_type,
     )
 
-    resolved_branch_room_id = _resolve_branch_room_id(branch_room_id, room_id, branch_id)
+    resolved_branch_room_id = _resolve_branch_room_id(branch_room_id, room_id, branch_code)
 
     payload = RoomImageCreate(
         branch_room_id=resolved_branch_room_id,

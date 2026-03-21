@@ -5,8 +5,8 @@ from enum import Enum
 from psycopg.rows import dict_row
 
 
-def _generate_booking_code(branch_id: str, now: datetime) -> str:
-    branch_suffix = str(branch_id).replace("-", "")[-4:].upper()
+def _generate_booking_code(branch_code: str, now: datetime) -> str:
+    branch_suffix = str(branch_code).replace("-", "")[-4:].upper()
     timestamp = now.strftime("%Y%m%d%H%M%S") + f"{int(now.microsecond / 1000):03d}"
     return f"{branch_suffix}-{timestamp}"
 
@@ -68,11 +68,12 @@ def _get_latest_payment_status(cur, booking_id: str) -> str:
     return payment["payment_status"] if payment else PaymentStatus.UNPAID.value
 
 
-def _create_completed_payment(cur, booking_id: str, amount: float, actor_id: str | None) -> None:
+def _create_completed_payment(cur, branch_code: str, booking_id: str, amount: float, actor_id: str | None) -> None:
     now = datetime.now()
     cur.execute(
         """
         INSERT INTO payments (
+            branch_code,
             booking_id,
             amount,
             status,
@@ -81,13 +82,13 @@ def _create_completed_payment(cur, booking_id: str, amount: float, actor_id: str
             created_user,
             del_flg
         )
-        VALUES (%s, %s, 'Completed', %s, %s, %s, 0);
+        VALUES (%s, %s, %s, 'Completed', %s, %s, %s, 0);
         """,
-        (booking_id, amount, now.date(), now.time(), actor_id),
+        (branch_code, booking_id, amount, now.date(), now.time(), actor_id),
     )
 
 
-def _sync_paid_payment(cur, booking_id: str, total_price: float, requested_payment_status: str | None, actor_id: str | None) -> str:
+def _sync_paid_payment(cur, branch_code: str, booking_id: str, total_price: float, requested_payment_status: str | None, actor_id: str | None) -> str:
     current_payment_status = _get_latest_payment_status(cur, booking_id)
     if requested_payment_status is None:
         return current_payment_status
@@ -96,20 +97,20 @@ def _sync_paid_payment(cur, booking_id: str, total_price: float, requested_payme
         raise ValueError("Không thể chuyển trạng thái thanh toán từ đã thanh toán về chưa thanh toán")
 
     if requested_payment_status == PaymentStatus.PAID.value and current_payment_status != PaymentStatus.PAID.value:
-        _create_completed_payment(cur, booking_id, total_price, actor_id)
+        _create_completed_payment(cur, branch_code, booking_id, total_price, actor_id)
         return PaymentStatus.PAID.value
 
     return current_payment_status
 
 
-def _resolve_booking_room(cur, branch_id: str | None, room_id: str | None, branch_room_id: str | None) -> tuple[str, str, str, float]:
+def _resolve_booking_room(cur, branch_code: str | None, room_id: str | None, branch_room_id: str | None) -> tuple[str, str, str, float]:
     if branch_room_id:
         cur.execute(
             """
             SELECT
                 br.room_id::text AS room_id,
                 br.branch_room_id::text AS branch_room_id,
-                br.branch_id::text AS branch_id,
+                br.branch_code::text AS branch_code,
                 r.price
             FROM branch_rooms br
             JOIN rooms r ON r.room_id = br.room_id
@@ -123,12 +124,12 @@ def _resolve_booking_room(cur, branch_id: str | None, room_id: str | None, branc
         if not room:
             raise ValueError("Không tìm thấy phòng chi nhánh để đặt")
 
-        return room["room_id"], room["branch_room_id"], room["branch_id"], float(room["price"] or 0)
+        return room["room_id"], room["branch_room_id"], room["branch_code"], float(room["price"] or 0)
 
     if room_id:
         cur.execute(
             """
-            SELECT room_id::text AS room_id, branch_id::text AS branch_id, price
+            SELECT room_id::text AS room_id, branch_code::text AS branch_code, price
             FROM rooms
             WHERE room_id = %s AND del_flg = 0;
             """,
@@ -138,25 +139,25 @@ def _resolve_booking_room(cur, branch_id: str | None, room_id: str | None, branc
         if not room:
             raise ValueError("Không tìm thấy phòng để đặt")
 
-        resolved_branch_id = branch_id or room["branch_id"]
+        resolved_branch_code = branch_code or room["branch_code"]
 
         cur.execute(
             """
             SELECT
                 br.branch_room_id::text AS branch_room_id,
                 br.room_id::text AS room_id,
-                br.branch_id::text AS branch_id,
+                br.branch_code::text AS branch_code,
                 r.price
             FROM branch_rooms br
             JOIN rooms r ON r.room_id = br.room_id
-            WHERE br.branch_id = %s
+            WHERE br.branch_code = %s
               AND br.room_id = %s
               AND br.del_flg = 0
               AND r.del_flg = 0
             ORDER BY br.room_number, br.branch_room_id
             LIMIT 1;
             """,
-            (resolved_branch_id, room_id),
+            (resolved_branch_code, room_id),
         )
         available_branch_room = cur.fetchone()
         if not available_branch_room:
@@ -165,7 +166,7 @@ def _resolve_booking_room(cur, branch_id: str | None, room_id: str | None, branc
         return (
             available_branch_room["room_id"],
             available_branch_room["branch_room_id"],
-            available_branch_room["branch_id"],
+            available_branch_room["branch_code"],
             float(available_branch_room["price"] or 0),
         )
 
@@ -179,16 +180,16 @@ def create_booking(booking: BookingCreate | BookingAdminCreate, total_price: flo
 
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            resolved_room_id, resolved_branch_room_id, resolved_branch_id, nightly_price = _resolve_booking_room(
+            resolved_room_id, resolved_branch_room_id, resolved_branch_code, nightly_price = _resolve_booking_room(
                 cur,
-                str(booking.branch_id) if booking.branch_id else None,
+                str(booking.branch_code) if booking.branch_code else None,
                 str(booking.room_id) if booking.room_id else None,
                 str(booking.branch_room_id) if booking.branch_room_id else None,
             )
 
             total_price = nightly_price * nights
             now = datetime.now()
-            booking_code = _generate_booking_code(resolved_branch_id, now)
+            booking_code = _generate_booking_code(resolved_branch_code, now)
             booking_status = _normalize_booking_status(getattr(booking, "status", BookingStatus.PENDING.value))
             requested_payment_status = _normalize_payment_status(getattr(booking, "payment_status", None))
             cur.execute(
@@ -198,7 +199,7 @@ def create_booking(booking: BookingCreate | BookingAdminCreate, total_price: flo
                     rt.name AS room_type_name,
                     br.room_number
                 FROM rooms r
-                JOIN branches b ON b.branch_id = r.branch_id
+                JOIN branches b ON b.branch_code = r.branch_code
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
                 LEFT JOIN branch_rooms br ON br.branch_room_id = %s
                 WHERE r.room_id = %s;
@@ -208,13 +209,14 @@ def create_booking(booking: BookingCreate | BookingAdminCreate, total_price: flo
             room_detail = cur.fetchone() or {}
             cur.execute("""
                 INSERT INTO bookings (
-                    user_id, branch_room_id, booking_code, voucher_code, customer_name, customer_email,
+                    branch_code, user_id, branch_room_id, booking_code, voucher_code, customer_name, customer_email,
                     customer_phonenumber, note, from_date, to_date, total_price, status,
                     created_date, created_time, created_user, del_flg, room_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
                 RETURNING *;
             """, (
+                resolved_branch_code,
                 str(booking.user_id) if booking.user_id else None,
                 resolved_branch_room_id,
                 booking_code,
@@ -236,6 +238,7 @@ def create_booking(booking: BookingCreate | BookingAdminCreate, total_price: flo
             new_booking = cur.fetchone()
             payment_status = _sync_paid_payment(
                 cur,
+                resolved_branch_code,
                 str(new_booking["booking_id"]),
                 total_price,
                 requested_payment_status,
@@ -285,7 +288,7 @@ def get_all_bookings_with_details():
                 FROM bookings b
                 LEFT JOIN branch_rooms br ON br.branch_room_id = b.branch_room_id
                 LEFT JOIN rooms r ON r.room_id = b.room_id
-                LEFT JOIN branches branch ON branch.branch_id = COALESCE(br.branch_id, r.branch_id)
+                LEFT JOIN branches branch ON branch.branch_code = COALESCE(br.branch_code, r.branch_code)
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
                 LEFT JOIN LATERAL (
                     SELECT p.status
@@ -354,6 +357,7 @@ def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate,
 
             _sync_paid_payment(
                 cur,
+                (updated_booking or current_booking)["branch_code"],
                 booking_id,
                 float((updated_booking or current_booking).get("total_price") or 0),
                 requested_payment_status,

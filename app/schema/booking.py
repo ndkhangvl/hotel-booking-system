@@ -18,7 +18,7 @@ class PaymentStatus(str, Enum):
 
 class BookingBase(BaseModel):
     user_id: Optional[UUID] = None
-    branch_id: Optional[UUID] = None
+    branch_code: Optional[str] = None
     branch_room_id: Optional[UUID] = None
     room_id: Optional[UUID] = None
     voucher_code: Optional[str] = Field(None, max_length=20)
@@ -65,7 +65,7 @@ class BookingAdminResponse(BookingResponse):
 
 class BookingAdminUpdate(BaseModel):
     user_id: Optional[UUID] = None
-    branch_id: Optional[UUID] = None
+    branch_code: Optional[str] = None
     branch_room_id: Optional[UUID] = None
     room_id: Optional[UUID] = None
     status: Optional[BookingStatus] = None
