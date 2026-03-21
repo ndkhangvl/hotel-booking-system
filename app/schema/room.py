@@ -49,6 +49,7 @@ class BranchRoomResponse(BaseModel):
     room_type_id: Optional[UUID] = None
     room_type_name: Optional[str] = None
     del_flg: int
+    occupancy_status: int = 0
 
     class Config:
         from_attributes = True

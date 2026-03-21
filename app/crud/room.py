@@ -4,6 +4,16 @@ from datetime import date
 import math
 
 
+def _resolve_date_range(start_date: date | None, end_date: date | None) -> tuple[date, date]:
+    resolved_start_date = start_date or date.today()
+    resolved_end_date = end_date or resolved_start_date
+
+    if resolved_end_date < resolved_start_date:
+        raise ValueError("Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu")
+
+    return resolved_start_date, resolved_end_date
+
+
 def _attach_amenities(conn, rooms: list[dict]) -> list[dict]:
     if not rooms:
         return []
@@ -94,20 +104,49 @@ def upsert_room(data: dict) -> str:
     return result_id
 
 
-def get_initialize_stats(branch_id: str) -> dict:
+def get_initialize_stats(branch_id: str, start_date: date | None = None, end_date: date | None = None) -> dict:
     """Trả về thống kê branch rooms của một chi nhánh: tổng, còn trống, không còn trống."""
+    start_date, end_date = _resolve_date_range(start_date, end_date)
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("""
                 SELECT
                     COUNT(*)                                              AS total_rooms,
-                    SUM(CASE WHEN del_flg = 0 THEN 1 ELSE 0 END)         AS available_rooms,
-                    SUM(CASE WHEN del_flg = 1 THEN 1 ELSE 0 END)         AS booked_rooms,
-                    SUM(CASE WHEN del_flg = 2 THEN 1 ELSE 0 END)         AS in_use_rooms,
-                    SUM(CASE WHEN del_flg = 3 THEN 1 ELSE 0 END)         AS unavailable_rooms
-                FROM branch_rooms
-                WHERE branch_id = %s;
-            """, (branch_id,))
+                    SUM(CASE WHEN occupancy_status = 0 THEN 1 ELSE 0 END) AS available_rooms,
+                    SUM(CASE WHEN occupancy_status = 1 THEN 1 ELSE 0 END) AS booked_rooms,
+                    SUM(CASE WHEN occupancy_status = 2 THEN 1 ELSE 0 END) AS in_use_rooms,
+                    SUM(CASE WHEN occupancy_status = 3 THEN 1 ELSE 0 END) AS unavailable_rooms
+                FROM (
+                    SELECT
+                        CASE
+                            WHEN br.del_flg = 3 THEN 3
+                            WHEN active_booking.booking_status = 'Checked-in' THEN 2
+                            WHEN active_booking.booking_status IN ('Pending', 'Confirmed') THEN 1
+                            ELSE 0
+                        END AS occupancy_status
+                    FROM branch_rooms br
+                    LEFT JOIN LATERAL (
+                        SELECT b.status AS booking_status
+                        FROM bookings b
+                        WHERE b.branch_room_id = br.branch_room_id
+                          AND b.del_flg = 0
+                                                    AND b.from_date <= %s
+                                                    AND b.to_date > %s
+                          AND b.status NOT IN ('Completed', 'Cancelled')
+                        ORDER BY
+                            CASE
+                                WHEN b.status = 'Checked-in' THEN 0
+                                WHEN b.status IN ('Pending', 'Confirmed') THEN 1
+                                ELSE 2
+                            END,
+                            b.created_date DESC,
+                            b.created_time DESC,
+                            b.booking_id DESC
+                        LIMIT 1
+                    ) active_booking ON TRUE
+                    WHERE br.branch_id = %s
+                ) occupancy;
+            """, (end_date, start_date, branch_id))
             stats = cur.fetchone()
 
     return {
@@ -145,12 +184,13 @@ def get_amenities() -> list:
             return cur.fetchall()
 
 
-def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, active_only: bool = False) -> dict:
+def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, active_only: bool = False, start_date: date | None = None, end_date: date | None = None) -> dict:
     """
     Lấy danh sách phòng của một chi nhánh có phân trang và kèm tiện ích.
     - active_only = True: Chỉ lấy phòng đang hoạt động (dành cho User).
     - active_only = False: Lấy tất cả các phòng (dành cho Admin).
     """
+    start_date, end_date = _resolve_date_range(start_date, end_date)
     offset = (page - 1) * page_size
     
     # Xây dựng điều kiện lọc động
@@ -182,20 +222,50 @@ def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, acti
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
                 LEFT JOIN (
                     SELECT
-                        branch_id,
-                        room_id,
-                        SUM(CASE WHEN del_flg = 0 THEN 1 ELSE 0 END) AS available_rooms,
-                        SUM(CASE WHEN del_flg = 1 THEN 1 ELSE 0 END) AS booked_rooms,
-                        SUM(CASE WHEN del_flg = 2 THEN 1 ELSE 0 END) AS in_use_rooms,
-                        SUM(CASE WHEN del_flg = 3 THEN 1 ELSE 0 END) AS unavailable_rooms
-                    FROM branch_rooms
-                    GROUP BY branch_id, room_id
+                        occupancy.branch_id,
+                        occupancy.room_id,
+                        SUM(CASE WHEN occupancy.occupancy_status = 0 THEN 1 ELSE 0 END) AS available_rooms,
+                        SUM(CASE WHEN occupancy.occupancy_status = 1 THEN 1 ELSE 0 END) AS booked_rooms,
+                        SUM(CASE WHEN occupancy.occupancy_status = 2 THEN 1 ELSE 0 END) AS in_use_rooms,
+                        SUM(CASE WHEN occupancy.occupancy_status = 3 THEN 1 ELSE 0 END) AS unavailable_rooms
+                    FROM (
+                        SELECT
+                            br.branch_id,
+                            br.room_id,
+                            CASE
+                                WHEN br.del_flg = 3 THEN 3
+                                WHEN active_booking.booking_status = 'Checked-in' THEN 2
+                                WHEN active_booking.booking_status IN ('Pending', 'Confirmed') THEN 1
+                                ELSE 0
+                            END AS occupancy_status
+                        FROM branch_rooms br
+                        LEFT JOIN LATERAL (
+                            SELECT b.status AS booking_status
+                            FROM bookings b
+                            WHERE b.branch_room_id = br.branch_room_id
+                              AND b.del_flg = 0
+                                                            AND b.from_date <= %s
+                                                            AND b.to_date > %s
+                              AND b.status NOT IN ('Completed', 'Cancelled')
+                            ORDER BY
+                                CASE
+                                    WHEN b.status = 'Checked-in' THEN 0
+                                    WHEN b.status IN ('Pending', 'Confirmed') THEN 1
+                                    ELSE 2
+                                END,
+                                b.created_date DESC,
+                                b.created_time DESC,
+                                b.booking_id DESC
+                            LIMIT 1
+                        ) active_booking ON TRUE
+                    ) occupancy
+                    GROUP BY occupancy.branch_id, occupancy.room_id
                 ) br_stats ON br_stats.branch_id = r.branch_id AND br_stats.room_id = r.room_id
                 {where_clause}
                 ORDER BY r.created_date, r.room_id
                 LIMIT %s OFFSET %s;
             """
-            cur.execute(select_query, (branch_id, page_size, offset))
+            cur.execute(select_query, (end_date, start_date, branch_id, page_size, offset))
             rows = cur.fetchall()
 
         rooms = [dict(r) for r in rows]
@@ -213,7 +283,8 @@ def get_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, acti
     }
 
 
-def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10) -> dict:
+def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 10, start_date: date | None = None, end_date: date | None = None) -> dict:
+    start_date, end_date = _resolve_date_range(start_date, end_date)
     offset = (page - 1) * page_size
 
     with get_connection() as conn:
@@ -237,15 +308,40 @@ def get_branch_rooms_by_branch(branch_id: str, page: int = 1, page_size: int = 1
                     br.room_number,
                     r.room_type_id,
                     rt.name AS room_type_name,
-                    br.del_flg
+                    br.del_flg,
+                    CASE
+                        WHEN br.del_flg = 3 THEN 3
+                        WHEN active_booking.booking_status = 'Checked-in' THEN 2
+                        WHEN active_booking.booking_status IN ('Pending', 'Confirmed') THEN 1
+                        ELSE 0
+                    END AS occupancy_status
                 FROM branch_rooms br
                 JOIN rooms r ON r.room_id = br.room_id
                 LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
+                LEFT JOIN LATERAL (
+                    SELECT b.status AS booking_status
+                    FROM bookings b
+                    WHERE b.branch_room_id = br.branch_room_id
+                      AND b.del_flg = 0
+                                            AND b.from_date <= %s
+                                            AND b.to_date > %s
+                      AND b.status NOT IN ('Completed', 'Cancelled')
+                    ORDER BY
+                        CASE
+                            WHEN b.status = 'Checked-in' THEN 0
+                            WHEN b.status IN ('Pending', 'Confirmed') THEN 1
+                            ELSE 2
+                        END,
+                        b.created_date DESC,
+                        b.created_time DESC,
+                        b.booking_id DESC
+                    LIMIT 1
+                ) active_booking ON TRUE
                 WHERE br.branch_id = %s
                 ORDER BY br.room_number, br.branch_room_id
                 LIMIT %s OFFSET %s;
                 """,
-                (branch_id, page_size, offset),
+                (end_date, start_date, branch_id, page_size, offset),
             )
             items = cur.fetchall()
 

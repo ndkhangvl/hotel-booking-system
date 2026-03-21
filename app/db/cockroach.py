@@ -146,10 +146,20 @@ def migrate_legacy_schema():
                     """
                 )
 
-                has_booking_room_id = _column_exists(cur, "bookings", "room_id")
+                booking_columns = {
+                    "branch_room_id": "UUID",
+                    "booking_code": "VARCHAR(32)",
+                    "voucher_code": "VARCHAR(20)",
+                    "customer_name": "VARCHAR(100)",
+                    "customer_email": "VARCHAR(150)",
+                    "customer_phonenumber": "VARCHAR(15)",
+                    "note": "STRING",
+                    "room_id": "UUID",
+                }
 
-                if not has_booking_room_id:
-                    cur.execute("ALTER TABLE bookings ADD COLUMN room_id UUID;")
+                for column_name, column_type in booking_columns.items():
+                    if not _column_exists(cur, "bookings", column_name):
+                        cur.execute(f"ALTER TABLE bookings ADD COLUMN {column_name} {column_type};")
 
                 cur.execute("ALTER TABLE bookings DROP CONSTRAINT IF EXISTS fk_bookings_room;")
                 cur.execute(
@@ -302,7 +312,12 @@ def create_all_tables():
             booking_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id UUID,
             branch_room_id UUID,
+            booking_code VARCHAR(32),
             voucher_code VARCHAR(20),
+            customer_name VARCHAR(100) NOT NULL,
+            customer_email VARCHAR(150) NOT NULL,
+            customer_phonenumber VARCHAR(15) NOT NULL,
+            note STRING,
             from_date DATE NOT NULL,
             to_date DATE NOT NULL,
             total_price DECIMAL(10, 2) NOT NULL,
@@ -313,7 +328,9 @@ def create_all_tables():
             updated_date DATE,
             updated_time TIME,
             updated_user UUID,
-            del_flg SMALLINT DEFAULT 0
+            del_flg SMALLINT DEFAULT 0,
+            room_id UUID,
+            CONSTRAINT fk_bookings_room FOREIGN KEY (room_id) REFERENCES rooms(room_id)
         );
         """),
 
@@ -471,19 +488,29 @@ def seed_basic_hotel_data():
 
         # 8. Bảng bookings (Lấy ngẫu nhiên 2 phòng từ branch_rooms để tạo booking cho khách Nguyễn Văn A)
         """WITH sample_rooms AS (
-            SELECT branch_room_id FROM branch_rooms LIMIT 2
+            SELECT branch_room_id, room_id FROM branch_rooms LIMIT 2
         )
-        INSERT INTO bookings (booking_id, user_id, branch_room_id, voucher_code, from_date, to_date, total_price, status, created_date, created_time, del_flg)
+        INSERT INTO bookings (
+            booking_id, user_id, branch_room_id, booking_code, voucher_code, customer_name,
+            customer_email, customer_phonenumber, note, from_date, to_date,
+            total_price, status, created_date, created_time, del_flg, room_id
+        )
         SELECT 
             gen_random_uuid(),
             'e5000000-0000-0000-0000-000000000003'::UUID, -- Nguyễn Văn A
             branch_room_id,
+            CONCAT(RIGHT(REPLACE(CAST((SELECT branch_id FROM branch_rooms br2 WHERE br2.branch_room_id = sample_rooms.branch_room_id) AS STRING), '-', ''), 4), '-', TO_CHAR(CURRENT_TIMESTAMP, 'YYYYMMDDHH24MISSMS')),
             'WELCOME2026',
+            'Nguyễn Văn A',
+            'nguyenvana@example.com',
+            '84901234567',
+            'Khách muốn nhận phòng tầng cao',
             CURRENT_DATE + INTERVAL '1 day',
             CURRENT_DATE + INTERVAL '3 days',
             1200000.00, -- Giá mô phỏng
             'Confirmed',
-            CURRENT_DATE, CURRENT_TIME, 0
+            CURRENT_DATE, CURRENT_TIME, 0,
+            room_id
         FROM sample_rooms;""",
 
         # 9. Bảng payments (Tạo thanh toán thành công cho các booking vừa tạo)
