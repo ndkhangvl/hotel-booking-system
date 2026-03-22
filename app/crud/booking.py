@@ -304,6 +304,44 @@ def get_all_bookings_with_details():
             )
             return cur.fetchall()
 
+def get_bookings_by_user_id(user_id: str):
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT
+                    b.*,
+                    branch.name AS branch_name,
+                    rt.name AS room_type_name,
+                    br.room_number,
+                    COALESCE(
+                        CASE
+                            WHEN LOWER(pay.status) IN ('completed', 'paid') THEN 'paid'
+                            WHEN LOWER(pay.status) = 'refunded' THEN 'refunded'
+                            ELSE 'unpaid'
+                        END,
+                        'unpaid'
+                    ) AS payment_status
+                FROM bookings b
+                LEFT JOIN branch_rooms br ON br.branch_room_id = b.branch_room_id
+                LEFT JOIN rooms r ON r.room_id = b.room_id
+                LEFT JOIN branches branch ON branch.branch_code = COALESCE(br.branch_code, r.branch_code)
+                LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
+                LEFT JOIN LATERAL (
+                    SELECT p.status
+                    FROM payments p
+                    WHERE p.booking_id = b.booking_id
+                      AND p.del_flg = 0
+                    ORDER BY p.created_date DESC, p.created_time DESC, p.payment_id DESC
+                    LIMIT 1
+                ) pay ON TRUE
+                WHERE b.user_id = %s AND b.del_flg = 0
+                ORDER BY b.created_date DESC, b.created_time DESC, b.booking_id DESC;
+                """,
+                (user_id,)
+            )
+            return cur.fetchall()
+
 def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate, admin_id: str = None):
     update_data = booking_update.model_dump(exclude_unset=True)
     with get_connection() as conn:
@@ -440,3 +478,47 @@ def process_check_out(booking_id: str, receptionist_id: str = None):
             updated_booking = cur.fetchone()
         conn.commit()
         return updated_booking
+
+def check_user_stayed_in_room(room_id: str, user_id: str = None, email: str = None, phone: str = None):
+    """
+    Kiểm tra xem user_id, email hoặc phone đã từng đặt (hoặc ở) phòng room_id chưa.
+    Hợp lệ nếu status nằm trong ('Confirmed', 'Checked-in', 'Completed').
+    """
+    if not user_id and not email and not phone:
+        return None
+        
+    conditions = []
+    params = []
+    
+    if user_id:
+        conditions.append("user_id = %s")
+        params.append(user_id)
+    if email:
+        conditions.append("customer_email = %s")
+        params.append(email)
+    if phone:
+        conditions.append("customer_phonenumber = %s")
+        params.append(phone)
+        
+    where_clause = " OR ".join(conditions)
+    params.extend([room_id])
+    
+    query = f"""
+        SELECT booking_id, booking_code, branch_code, customer_name
+        FROM bookings 
+        WHERE ({where_clause})
+          AND room_id = %s 
+          AND status IN ('Confirmed', 'Checked-in', 'Completed') 
+          AND del_flg = 0
+        ORDER BY created_date DESC, created_time DESC
+        LIMIT 1;
+    """
+    
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            row = cur.fetchone()
+            if row:
+                cols = [d[0] for d in cur.description]
+                return dict(zip(cols, row))
+            return None

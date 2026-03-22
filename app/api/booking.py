@@ -4,6 +4,12 @@ from app.schema.booking import BookingAdminCreate, BookingCreate, BookingRespons
 from app.crud import booking as crud_booking
 from app.utils.email_queue import enqueue_booking_confirmation_email
 from app.crud.audit import log_audit_event
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
+from app.core.security import SECRET_KEY, ALGORITHM
+from app.crud.user import get_user_by_id
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 routerReceptionist = APIRouter(prefix="/Receptionist/bookings", tags=["receptionist - Bookings"])
@@ -29,6 +35,29 @@ async def create_new_booking(booking: BookingCreate):
         return created_booking
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi tạo booking: {e}")
+
+from fastapi import Depends
+
+@router.get("/user/me", response_model=List[BookingAdminResponse])
+async def read_my_bookings(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Token không hợp lệ")
+        
+        user_db = get_user_by_id(user_id)
+        if not user_db:
+            raise HTTPException(status_code=401, detail="Không tìm thấy người dùng")
+
+        bookings = crud_booking.get_bookings_by_user_id(user_id)
+        return bookings
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token không hợp lệ hoặc đã hết hạn")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy lịch sử đặt phòng: {str(e)}")
 
 
 @routerReceptionist.get("/", response_model=List[BookingResponse])
