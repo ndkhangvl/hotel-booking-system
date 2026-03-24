@@ -34,12 +34,22 @@ def get_user_by_email(email: str):
             return _row_to_dict(cur, row)
 
 
-def get_all_users():
+def get_all_users(page: int = 1, page_size: int = 128):
+    offset = (page - 1) * page_size
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM users WHERE del_flg = 0;")
+            cur.execute("SELECT COUNT(user_id) FROM users WHERE del_flg = 0;")
+            total = cur.fetchone()[0]
+
+            cur.execute("SELECT * FROM users WHERE del_flg = 0 ORDER BY created_date DESC, created_time DESC LIMIT %s OFFSET %s;", (page_size, offset))
             rows = cur.fetchall()
-            return [_row_to_dict(cur, r) for r in rows]
+            items = [_row_to_dict(cur, r) for r in rows]
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size
+            }
 
 
 def get_user_by_id(user_id: str):

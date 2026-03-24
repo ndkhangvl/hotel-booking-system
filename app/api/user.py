@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from typing import List
 from fastapi.security import OAuth2PasswordBearer
-from app.schema.user import UserCreate, UserUpdate, UserResponse, UserLogin, Token
+from app.schema.user import UserCreate, UserUpdate, UserResponse, UserLogin, Token, UserPaginationResponse
 from app.crud import user as crud_user
 from app.core import security 
 from app.crud.audit import log_audit_event
@@ -49,9 +49,13 @@ async def login(login_data: UserLogin):
         "token_type": "bearer",
     }
 
-@router.get("/", response_model=List[UserResponse])
-async def read_users(token: str = Depends(oauth2_scheme)):
-    return crud_user.get_all_users()
+@router.get("/", response_model=UserPaginationResponse)
+async def read_users(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(128, ge=1, le=200),
+    token: str = Depends(oauth2_scheme)
+):
+    return crud_user.get_all_users(page=page, page_size=page_size)
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def read_user(user_id: str, token: str = Depends(oauth2_scheme)):

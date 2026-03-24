@@ -178,7 +178,6 @@ def migrate_legacy_schema():
 
 def create_all_tables():
     tables = [
-        # BẢNG DÙNG CHUNG (Global Tables) - Giữ nguyên
         ("users", """
         CREATE TABLE IF NOT EXISTS users (
             user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -187,8 +186,8 @@ def create_all_tables():
             phone VARCHAR(15),
             password VARCHAR(255) NOT NULL,
             role VARCHAR(20) NOT NULL CHECK (role IN ('Guest', 'Customer', 'Receptionist', 'Admin')),
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
@@ -202,8 +201,8 @@ def create_all_tables():
             room_type_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name VARCHAR(50) NOT NULL,
             description TEXT,
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
@@ -217,8 +216,8 @@ def create_all_tables():
             amenity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             name VARCHAR(100) NOT NULL,
             icon_url VARCHAR(255),
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
@@ -233,8 +232,8 @@ def create_all_tables():
             discount_value DECIMAL(10, 2) NOT NULL,
             valid_from TIMESTAMP NOT NULL,
             valid_to TIMESTAMP NOT NULL,
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
@@ -243,40 +242,38 @@ def create_all_tables():
         );
         """),
 
-        # BẢNG THEO CHI NHÁNH (Partitioned Tables)
         ("branches", """
         CREATE TABLE IF NOT EXISTS branches (
-            branch_code VARCHAR(20) PRIMARY KEY, -- Dùng Mã thay cho UUID để dễ chia vùng
+            branch_code VARCHAR(20) PRIMARY KEY,
             name VARCHAR(100) NOT NULL,
             address VARCHAR(255) NOT NULL,
             phone VARCHAR(15),
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
             updated_user UUID,
             del_flg SMALLINT DEFAULT 0,
-            room_id UUID,
-            CONSTRAINT fk_bookings_room FOREIGN KEY (room_id) REFERENCES rooms(room_id)
+            room_id UUID
         );
         """),
 
         ("rooms", """
         CREATE TABLE IF NOT EXISTS rooms (
-            branch_code VARCHAR(20) NOT NULL, -- Thêm branch_code làm gốc
+            branch_code VARCHAR(20) NOT NULL,
             room_id UUID DEFAULT gen_random_uuid(),
             room_type_id UUID,
             price DECIMAL(10, 2) NOT NULL,
             people_number INT NOT NULL,
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
             updated_user UUID,
             del_flg SMALLINT DEFAULT 0,
-            PRIMARY KEY (branch_code, room_id) -- Khóa chính kép
+            PRIMARY KEY (branch_code, room_id)
         );
         """),
 
@@ -286,8 +283,8 @@ def create_all_tables():
             branch_room_id UUID DEFAULT gen_random_uuid(),
             room_id UUID NOT NULL,
             room_number VARCHAR(20) NOT NULL,
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
@@ -303,8 +300,8 @@ def create_all_tables():
             branch_code VARCHAR(20) NOT NULL,
             room_id UUID,
             amenity_id UUID,
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
@@ -314,10 +311,9 @@ def create_all_tables():
         );
         """),
 
-        # CẬP NHẬT BẢNG BOOKINGS THEO YÊU CẦU MỚI
         ("bookings", """
         CREATE TABLE IF NOT EXISTS bookings (
-            branch_code VARCHAR(20) NOT NULL, -- Bắt buộc phải có để chia vùng
+            branch_code VARCHAR(20) NOT NULL,
             booking_id UUID NOT NULL DEFAULT gen_random_uuid(),
             booking_code VARCHAR(22) NOT NULL,
             user_id UUID NULL,
@@ -326,22 +322,21 @@ def create_all_tables():
             customer_name VARCHAR(100) NOT NULL,
             customer_email VARCHAR(150) NULL,
             customer_phonenumber VARCHAR(15) NOT NULL,
-            note STRING NULL,
+            note TEXT NULL,
             from_date DATE NOT NULL,
             to_date DATE NOT NULL,
             total_price DECIMAL(10,2) NOT NULL,
             status VARCHAR(20) NOT NULL DEFAULT 'Pending',
-            created_date DATE NULL DEFAULT current_date(),
-            created_time TIME NULL DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID NULL,
             updated_date DATE NULL,
             updated_time TIME NULL,
             updated_user UUID NULL,
-            del_flg SMALLINT NULL DEFAULT 0,
+            del_flg SMALLINT DEFAULT 0,
             room_id UUID NULL,
-            CONSTRAINT bookings_pkey PRIMARY KEY (branch_code, booking_id), -- Khóa chính kép để Partition
-            CONSTRAINT fk_bookings_room FOREIGN KEY (branch_code, room_id) REFERENCES public.rooms(branch_code, room_id), -- Cập nhật FK
-            UNIQUE INDEX bookings_booking_code_key (booking_code ASC)
+            CONSTRAINT bookings_pkey PRIMARY KEY (branch_code, booking_id),
+            CONSTRAINT bookings_booking_code_key UNIQUE (booking_code)
         );
         """),
 
@@ -352,8 +347,8 @@ def create_all_tables():
             booking_id UUID,
             amount DECIMAL(10, 2) NOT NULL,
             status VARCHAR(20) NOT NULL DEFAULT 'Pending',
-            created_date DATE DEFAULT current_date(),
-            created_time TIME DEFAULT current_time(),
+            created_date DATE DEFAULT CURRENT_DATE,
+            created_time TIME DEFAULT CURRENT_TIME,
             created_user UUID,
             updated_date DATE,
             updated_time TIME,
@@ -371,7 +366,6 @@ def create_all_tables():
                     cur.execute(ddl)
                     print(f"✅ Tạo bảng {table_name} thành công")
             conn.commit()
-        # migrate_legacy_schema()
         print("🎉 Tạo toàn bộ bảng thành công")
     except Exception as e:
         print("❌ Lỗi tạo bảng:", e)

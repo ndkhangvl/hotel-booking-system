@@ -58,5 +58,5 @@ async def stop_email_queue_worker() -> None:
 
 
 async def enqueue_booking_confirmation_email(booking: dict) -> None:
-    await _email_queue.put(booking)
+    # await _email_queue.put(booking)
     print(f"[booking-email-queue] Enqueued booking email: {booking.get('booking_code') or booking.get('booking_id')}")

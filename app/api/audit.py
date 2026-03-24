@@ -14,7 +14,7 @@ async def fetch_audit_logs(
     start_date: Optional[str] = Query(None, description="Ngày bắt đầu sự kiện (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="Ngày kết thúc sự kiện (YYYY-MM-DD)"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100)
+    page_size: int = Query(20, ge=1, le=200)
 ):
     try:
         results = await get_audit_logs(

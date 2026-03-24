@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import date, time
 from uuid import UUID 
 
@@ -38,3 +38,9 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     user_id: Optional[str] = None
+
+class UserPaginationResponse(BaseModel):
+    items: List[UserResponse]
+    total: int
+    page: int
+    page_size: int

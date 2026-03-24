@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from typing import List
-from app.schema.booking import BookingAdminCreate, BookingCreate, BookingResponse, BookingAdminResponse, BookingAdminUpdate
+from app.schema.booking import BookingAdminCreate, BookingCreate, BookingResponse, BookingAdminResponse, BookingAdminUpdate, BookingAdminPaginationResponse
 from app.crud import booking as crud_booking
 from app.utils.email_queue import enqueue_booking_confirmation_email
 from app.crud.audit import log_audit_event
@@ -19,7 +19,7 @@ routerAdmin = APIRouter(prefix="/Admin/bookings", tags=["Admin - Bookings"])
 async def create_new_booking(booking: BookingCreate):
     try:
         created_booking = crud_booking.create_booking(booking)
-        await enqueue_booking_confirmation_email(created_booking)
+        # await enqueue_booking_confirmation_email(created_booking)
         
         await log_audit_event(
             action="CREATE",
@@ -68,10 +68,13 @@ async def read_bookings_for_receptionist():
         raise HTTPException(status_code=400, detail=f"Lỗi lấy danh sách booking: {e}")
 
 
-@routerAdmin.get("/", response_model=List[BookingAdminResponse])
-async def read_bookings_for_admin():
+@routerAdmin.get("/", response_model=BookingAdminPaginationResponse)
+async def read_bookings_for_admin(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(128, ge=1, le=200)
+):
     try:
-        return crud_booking.get_all_bookings_with_details()
+        return crud_booking.get_all_bookings_with_details(page, page_size)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi lấy danh sách booking admin: {e}")
 
@@ -80,7 +83,7 @@ async def read_bookings_for_admin():
 async def create_booking_admin(booking: BookingAdminCreate):
     try:
         created_booking = crud_booking.create_booking(booking)
-        await enqueue_booking_confirmation_email(created_booking)
+        # await enqueue_booking_confirmation_email(created_booking)
 
         await log_audit_event(
             action="CREATE",

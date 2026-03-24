@@ -267,9 +267,14 @@ def get_all_bookings():
             return rows
 
 
-def get_all_bookings_with_details():
+def get_all_bookings_with_details(page: int = 1, page_size: int = 128):
+    offset = (page - 1) * page_size
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("SELECT COUNT(booking_id) AS total FROM bookings WHERE del_flg = 0;")
+            total_dict = cur.fetchone()
+            total = total_dict["total"] if total_dict else 0
+            
             cur.execute(
                 """
                 SELECT
@@ -299,10 +304,17 @@ def get_all_bookings_with_details():
                     LIMIT 1
                 ) pay ON TRUE
                 WHERE b.del_flg = 0
-                ORDER BY b.created_date DESC, b.created_time DESC, b.booking_id DESC;
-                """
+                ORDER BY b.created_date DESC, b.created_time DESC, b.booking_id DESC
+                LIMIT %s OFFSET %s;
+                """, (page_size, offset)
             )
-            return cur.fetchall()
+            items = cur.fetchall()
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size
+            }
 
 def get_bookings_by_user_id(user_id: str):
     with get_connection() as conn:

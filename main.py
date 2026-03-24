@@ -9,6 +9,7 @@ from app.api import room
 from app.api import room_image
 from app.api import audit
 from app.api import review
+from app.api import dashboard
 from app.utils.email_queue import start_email_queue_worker, stop_email_queue_worker
 
 app = FastAPI(title="FastAPI + CockroachDB + MongoDB")
@@ -72,3 +73,4 @@ app.include_router(booking.routerAdmin)
 app.include_router(room_image.router)
 app.include_router(audit.router)
 app.include_router(review.router)
+app.include_router(dashboard.router)

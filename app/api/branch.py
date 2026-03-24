@@ -24,7 +24,7 @@ async def initialize():
 @router.get("/branches-list", response_model=BranchPaginationResponse)
 async def branches_list(
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=10, ge=1, le=100)
+    page_size: int = Query(default=10, ge=1, le=200)
 ):
     try:
         # Nhờ dict_row, hàm này trả về cấu trúc dict lồng nhau 
@@ -79,7 +79,7 @@ async def upsert_branch(branch_data: BranchUpdate):
 @routerForUser.get("/branches-list", response_model=BranchPaginationResponse)
 async def branches_list(
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=10, ge=1, le=100)
+    page_size: int = Query(default=10, ge=1, le=200)
 ):
     try:
         # Nhờ dict_row, hàm này trả về cấu trúc dict lồng nhau 
@@ -93,7 +93,7 @@ async def branches_list(
 async def search_branches_api(
     keyword: str = Query(..., min_length=1, description="Từ khóa tìm kiếm (tên, địa chỉ)"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100)
+    page_size: int = Query(10, ge=1, le=200)
 ):
     """
     Tìm kiếm chi nhánh theo tên hoặc địa chỉ (không phân biệt hoa thường).

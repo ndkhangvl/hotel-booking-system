@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import date, time
 from enum import Enum
 from uuid import UUID # Dùng UUID thường để tránh lỗi 422 khắt khe của UUID4
@@ -62,6 +62,12 @@ class BookingAdminResponse(BookingResponse):
     room_type_name: Optional[str] = None
     room_number: Optional[str] = None
     payment_status: PaymentStatus = PaymentStatus.UNPAID
+
+class BookingAdminPaginationResponse(BaseModel):
+    items: List[BookingAdminResponse]
+    total: int
+    page: int
+    page_size: int
 
 class BookingAdminUpdate(BaseModel):
     user_id: Optional[UUID] = None
