@@ -48,6 +48,7 @@ class BranchRoomResponse(BaseModel):
     room_number: str
     room_type_id: Optional[UUID] = None
     room_type_name: Optional[str] = None
+    price: Optional[Decimal] = None
     del_flg: int
     occupancy_status: int = 0
 

@@ -1,6 +1,7 @@
 from app.db.cockroach import get_connection
 from app.schema.user import UserCreate, UserUpdate
 from app.core.security import get_password_hash
+from typing import List, Dict, Any, Optional
 
 
 def _row_to_dict(cur, row):
@@ -115,3 +116,23 @@ def delete_user(user_id: str):
             row = cur.fetchone()
         conn.commit()
         return row is not None
+
+
+def create_users_bulk(users: List[UserCreate]):
+    if not users:
+        return []
+
+    results = []
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            for user in users:
+                password = get_password_hash(user.password)
+                cur.execute("""
+                    INSERT INTO users (name, email, phone, password, role)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING *;
+                """, (user.name, user.email, user.phone, password, user.role))
+                row = cur.fetchone()
+                results.append(_row_to_dict(cur, row))
+        conn.commit()
+    return results

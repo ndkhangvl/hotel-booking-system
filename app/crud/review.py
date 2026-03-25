@@ -77,3 +77,25 @@ async def get_reviews_by_room(room_id: str, skip: int = 0, limit: int = 20) -> L
         print(f"Failed to write audit log for VIEW_REVIEWS: {e}")
         
     return reviews
+
+
+async def create_reviews_bulk(reviews_list: List[dict]) -> List[str]:
+    """
+    Bulk create reviews in MongoDB for high performance.
+    """
+    if not reviews_list:
+        return []
+
+    db = get_mongo_db()
+    collection = db["reviews"]
+    
+    now = datetime.utcnow()
+    for review in reviews_list:
+        review["created_at"] = now
+        review["updated_at"] = now
+        review["status"] = "published"
+        
+    result = await collection.insert_many(reviews_list)
+    inserted_ids = [str(sid) for sid in result.inserted_ids]
+    
+    return inserted_ids

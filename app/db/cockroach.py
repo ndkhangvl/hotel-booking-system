@@ -315,7 +315,7 @@ def create_all_tables():
         CREATE TABLE IF NOT EXISTS bookings (
             branch_code VARCHAR(20) NOT NULL,
             booking_id UUID NOT NULL DEFAULT gen_random_uuid(),
-            booking_code VARCHAR(22) NOT NULL,
+            booking_code VARCHAR(32) NOT NULL,
             user_id UUID NULL,
             branch_room_id UUID NULL,
             voucher_code VARCHAR(20) NULL,

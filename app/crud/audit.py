@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from bson import ObjectId
 from app.db.mongo import get_mongo_db
+
+def convert_objectids(obj: Any) -> Any:
+    if isinstance(obj, list):
+        return [convert_objectids(item) for item in obj]
+    if isinstance(obj, dict):
+        return {k: convert_objectids(v) for k, v in obj.items()}
+    if isinstance(obj, ObjectId):
+        return str(obj)
+    return obj
 
 async def log_audit_event(
     action: str,
@@ -139,8 +149,8 @@ async def get_audit_logs(
         cursor = collection.find(query).sort("event_time", -1).skip((page - 1) * page_size).limit(page_size)
         items = []
         async for doc in cursor:
-            # Convert ObjectId to str if needed
-            doc["_id"] = str(doc["_id"])
+            # Convert ObjectId to str recursively
+            doc = convert_objectids(doc)
             items.append(doc)
 
         return {
@@ -153,3 +163,73 @@ async def get_audit_logs(
     except Exception as e:
         print(f"❌ Error fetching audit logs: {e}")
         return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0}
+
+async def log_audit_events_bulk(events: List[Dict[str, Any]]):
+    """
+    Log multiple audit events at once for better performance.
+    """
+    if not events:
+        return
+        
+    try:
+        db = get_mongo_db()
+        collection = db["audit_logs"]
+        
+        now = datetime.utcnow()
+        expire_at = now + timedelta(days=365 * 3)
+        
+        processed_events = []
+        for event in events:
+            # Recompute event_id and timestamps for each if not already present
+            evt_time = event.get("event_time", now)
+            evt_id = event.get("event_id") or f"AUD-{evt_time.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6]}"
+            
+            log_data = {
+                "event_id": evt_id,
+                "event_time": evt_time,
+                "service_name": "hotel-booking-api",
+                "source_db": "cockroachdb",
+                "source_table": event.get("source_table", "bookings"),
+                "branch_code": event.get("branch_code"),
+                "action": event.get("action", "CREATE").upper(),
+                "entity_type": event.get("entity_type", "booking"),
+                "entity_pk": event.get("entity_pk") or {
+                    "branch_code": event.get("branch_code"),
+                    "booking_id": str(event.get("booking_id", ""))
+                },
+                "actor": {
+                    "user_id": str(event.get("actor_id", "")) if event.get("actor_id") else None,
+                    "name": event.get("actor_name"),
+                    "role": event.get("actor_role"),
+                },
+                "request_context": {
+                    "endpoint": event.get("endpoint"),
+                    "method": event.get("method")
+                },
+                "business_context": {
+                    "reason": event.get("reason")
+                },
+                "before": event.get("before") or {},
+                "after": event.get("after") or {},
+                "changed_fields": event.get("changed_fields") or [],
+                "result": {
+                    "success": event.get("success", True),
+                    "message": event.get("message", "Tác vụ thành công")
+                },
+                "tags": [
+                    event.get("entity_type", "booking").lower(),
+                    event.get("action", "CREATE").lower(),
+                    event.get("branch_code", "system").lower()
+                ],
+                "expire_at": event.get("expire_at", expire_at)
+            }
+            
+            if "booking_code" in event:
+                log_data["booking_code"] = event["booking_code"]
+                
+            processed_events.append(log_data)
+            
+        if processed_events:
+            await collection.insert_many(processed_events)
+    except Exception as e:
+        print(f"❌ Failed to write bulk audit logs: {e}")

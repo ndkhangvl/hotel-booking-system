@@ -3,12 +3,18 @@ from app.schema.booking import BookingAdminCreate, BookingAdminUpdate, BookingCr
 from datetime import datetime
 from enum import Enum 
 from psycopg.rows import dict_row
+from typing import List, Dict, Any, Optional
+import random
+import string
+import math
 
 
 def _generate_booking_code(branch_code: str, now: datetime) -> str:
     branch_suffix = str(branch_code).replace("-", "")[-4:].upper()
-    timestamp = now.strftime("%Y%m%d%H%M%S") + f"{int(now.microsecond / 1000):03d}"
-    return f"{branch_suffix}-{timestamp}"
+    now = datetime.utcnow()
+    timestamp = now.strftime("%y%m%d%H%M%S%f") 
+    random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    return f"{branch_suffix}-{timestamp}-{random_suffix}"
 
 
 def _normalize_booking_status(value: str | Enum | None) -> str:
@@ -267,16 +273,42 @@ def get_all_bookings():
             return rows
 
 
-def get_all_bookings_with_details(page: int = 1, page_size: int = 128):
+def get_all_bookings_with_details(page: int = 1, page_size: int = 128, search: str = None, status: str = None):
     offset = (page - 1) * page_size
+    
+    where_clauses = ["b.del_flg = 0"]
+    params = []
+    
+    if search:
+        search_pattern = f"%{search}%"
+        where_clauses.append("(b.customer_name ILIKE %s OR b.customer_email ILIKE %s OR b.booking_code ILIKE %s)")
+        params.extend([search_pattern, search_pattern, search_pattern])
+        
+    if status and status != 'all':
+        # status from frontend 'pending', 'checkedIn', etc.
+        # we need to map to DB status if necessary
+        db_status = status
+        if status == 'checkedIn': db_status = 'Checked-in'
+        elif status == 'checkedOut': db_status = 'Completed'
+        else: db_status = status.capitalize()
+        
+        where_clauses.append("b.status = %s")
+        params.append(db_status)
+        
+    where_sql = " AND ".join(where_clauses)
+    
     with get_connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute("SELECT COUNT(booking_id) AS total FROM bookings WHERE del_flg = 0;")
+            # Count query
+            count_query = f"SELECT COUNT(b.booking_id) AS total FROM bookings b WHERE {where_sql};"
+            cur.execute(count_query, tuple(params))
             total_dict = cur.fetchone()
             total = total_dict["total"] if total_dict else 0
             
+            # Main query
+            main_params = params + [page_size, offset]
             cur.execute(
-                """
+                f"""
                 SELECT
                     b.*,
                     branch.name AS branch_name,
@@ -303,17 +335,21 @@ def get_all_bookings_with_details(page: int = 1, page_size: int = 128):
                     ORDER BY p.created_date DESC, p.created_time DESC, p.payment_id DESC
                     LIMIT 1
                 ) pay ON TRUE
-                WHERE b.del_flg = 0
+                WHERE {where_sql}
                 ORDER BY b.created_date DESC, b.created_time DESC, b.booking_id DESC
                 LIMIT %s OFFSET %s;
-                """, (page_size, offset)
+                """, tuple(main_params)
             )
             items = cur.fetchall()
+            import math
+            total_pages = math.ceil(total / page_size) if page_size > 0 else 0
+            
             return {
                 "items": items,
                 "total": total,
                 "page": page,
-                "page_size": page_size
+                "page_size": page_size,
+                "total_pages": total_pages
             }
 
 def get_bookings_by_user_id(user_id: str):
@@ -534,3 +570,96 @@ def check_user_stayed_in_room(room_id: str, user_id: str = None, email: str = No
                 cols = [d[0] for d in cur.description]
                 return dict(zip(cols, row))
             return None
+
+
+def create_bookings_bulk(bookings: List[BookingAdminCreate], current_user_id: str = None):
+    """
+    Bulk create bookings to optimize database operations.
+    Skips individual SELECTs where possible if data is already provided.
+    """
+    if not bookings:
+        return []
+
+    results = []
+    now = datetime.now()
+    
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            for booking in bookings:
+                try:
+                    nights = (booking.to_date - booking.from_date).days
+                    if nights <= 0:
+                        raise ValueError("Ngày trả phòng phải sau ngày nhận phòng")
+
+                    # If automation provides all resolved data, we can skip individual room lookups
+                    # which is crucial for 200,000 bookings.
+                    res_branch_code = str(booking.branch_code)
+                    res_room_id = str(booking.room_id)
+                    res_branch_room_id = str(booking.branch_room_id)
+                    
+                    # Use provided total_price or calculate if missing/zero
+                    total_price = booking.total_price
+                    if not total_price or total_price <= 0:
+                        # Fallback to resolution if missing details or zero price (slower)
+                        resolved_room_id, resolved_branch_room_id, resolved_branch_code, nightly_price = _resolve_booking_room(
+                            cur, res_branch_code, res_room_id, res_branch_room_id
+                        )
+                        total_price = nightly_price * nights
+                        res_branch_code = resolved_branch_code
+                        res_room_id = resolved_room_id
+                        res_branch_room_id = resolved_branch_room_id
+
+                    booking_code = _generate_booking_code(res_branch_code, now)
+                    booking_status = _normalize_booking_status(booking.status)
+                    requested_pay_status = _normalize_payment_status(booking.payment_status)
+
+                    cur.execute("""
+                        INSERT INTO bookings (
+                            branch_code, user_id, branch_room_id, booking_code, voucher_code, customer_name, customer_email,
+                            customer_phonenumber, note, from_date, to_date, total_price, status,
+                            created_date, created_time, created_user, del_flg, room_id
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s)
+                        RETURNING *;
+                    """, (
+                        res_branch_code,
+                        str(booking.user_id) if booking.user_id else None,
+                        res_branch_room_id,
+                        booking_code,
+                        booking.voucher_code,
+                        booking.customer_name.strip(),
+                        booking.customer_email.strip(),
+                        booking.customer_phonenumber.strip(),
+                        booking.note.strip() if booking.note else None,
+                        booking.from_date,
+                        booking.to_date,
+                        total_price,
+                        booking_status,
+                        now.date(),
+                        now.time(),
+                        current_user_id if current_user_id else (str(booking.user_id) if booking.user_id else None),
+                        res_room_id,
+                    ))
+
+                    new_booking = cur.fetchone()
+                    
+                    # Payment sync
+                    actual_pay_status = requested_pay_status or PaymentStatus.UNPAID.value
+                    if actual_pay_status == PaymentStatus.PAID.value:
+                        _create_completed_payment(
+                            cur, 
+                            res_branch_code, 
+                            str(new_booking["booking_id"]), 
+                            total_price, 
+                            current_user_id or (str(booking.user_id) if booking.user_id else None)
+                        )
+                    
+                    new_booking["payment_status"] = actual_pay_status
+                    results.append(new_booking)
+                except Exception as e:
+                    # In bulk, we might want to log the error but continue or abort.
+                    raise e
+            
+        conn.commit()
+
+    return results

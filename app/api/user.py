@@ -4,7 +4,7 @@ from fastapi.security import OAuth2PasswordBearer
 from app.schema.user import UserCreate, UserUpdate, UserResponse, UserLogin, Token, UserPaginationResponse
 from app.crud import user as crud_user
 from app.core import security 
-from app.crud.audit import log_audit_event
+from app.crud.audit import log_audit_event, log_audit_events_bulk
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -107,3 +107,29 @@ async def delete_user(user_id: str, token: str = Depends(oauth2_scheme)):
         method="DELETE",
         message="Xóa người dùng"
     )
+
+@router.post("/register/bulk", response_model=List[UserResponse])
+async def register_bulk(users_in: List[UserCreate]):
+    try:
+        new_users = crud_user.create_users_bulk(users_in)
+        
+        # Audit logging
+        audit_events = []
+        for u in new_users:
+            audit_events.append({
+                "action": "CREATE",
+                "entity_type": "user",
+                "source_table": "users",
+                "entity_pk": {"user_id": str(u.get("user_id"))},
+                "actor_role": "Admin",
+                "endpoint": "/users/register/bulk",
+                "method": "POST",
+                "message": "Đăng ký bulk người dùng mới"
+            })
+            
+        if audit_events:
+            await log_audit_events_bulk(audit_events)
+            
+        return new_users
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lỗi đăng ký bulk users: {str(e)}")

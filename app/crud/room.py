@@ -307,6 +307,7 @@ def get_branch_rooms_by_branch(branch_code: str, page: int = 1, page_size: int =
                     br.room_id,
                     br.room_number,
                     r.room_type_id,
+                    r.price,
                     rt.name AS room_type_name,
                     br.del_flg,
                     CASE

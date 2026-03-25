@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List
 from app.schema.booking import BookingAdminCreate, BookingCreate, BookingResponse, BookingAdminResponse, BookingAdminUpdate, BookingAdminPaginationResponse
 from app.crud import booking as crud_booking
 from app.utils.email_queue import enqueue_booking_confirmation_email
-from app.crud.audit import log_audit_event
+from app.crud.audit import log_audit_event, log_audit_events_bulk
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from app.core.security import SECRET_KEY, ALGORITHM
@@ -36,7 +36,6 @@ async def create_new_booking(booking: BookingCreate):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi tạo booking: {e}")
 
-from fastapi import Depends
 
 @router.get("/user/me", response_model=List[BookingAdminResponse])
 async def read_my_bookings(token: str = Depends(oauth2_scheme)):
@@ -71,10 +70,12 @@ async def read_bookings_for_receptionist():
 @routerAdmin.get("/", response_model=BookingAdminPaginationResponse)
 async def read_bookings_for_admin(
     page: int = Query(1, ge=1),
-    page_size: int = Query(128, ge=1, le=200)
+    page_size: int = Query(128, ge=1, le=200),
+    search: str = Query(None),
+    status: str = Query(None)
 ):
     try:
-        return crud_booking.get_all_bookings_with_details(page, page_size)
+        return crud_booking.get_all_bookings_with_details(page, page_size, search, status)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi lấy danh sách booking admin: {e}")
 
@@ -237,3 +238,30 @@ async def delete_booking_admin(booking_id: str):
         return {"message": "Xóa booking thành công", "booking_id": booking_id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi xóa booking: {e}")
+
+@routerAdmin.post("/bulk", response_model=List[BookingResponse])
+async def create_booking_bulk_admin(bookings: List[BookingAdminCreate]):
+    try:
+        created_bookings = crud_booking.create_bookings_bulk(bookings)
+        
+        # Prepare audit logs
+        audit_events = []
+        for b in created_bookings:
+            audit_events.append({
+                "action": "CREATE",
+                "branch_code": b.get("branch_code", "UNKNOWN"),
+                "booking_id": str(b.get("booking_id", "")),
+                "booking_code": b.get("booking_code", ""),
+                "actor_role": "Admin",
+                "endpoint": "/Admin/bookings/bulk",
+                "method": "POST",
+                "message": "Tạo booking bulk từ Admin (Automation)"
+            })
+            
+        if audit_events:
+            # We fire and forget or await, but for performance, bulk logging is much better
+            await log_audit_events_bulk(audit_events)
+            
+        return created_bookings
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lỗi tạo bulk booking: {str(e)}")
