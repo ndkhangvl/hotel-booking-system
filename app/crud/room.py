@@ -92,11 +92,11 @@ def upsert_room(data: dict) -> str:
                     WHERE room_id = %s;
                 """, (branch_code, room_type_id, price, people_number, del_flg, today, result_id))
 
-            cur.execute("DELETE FROM room_amenities WHERE room_id = %s;", (result_id,))
+            cur.execute("DELETE FROM room_amenities WHERE room_id = %s AND branch_code = %s;", (result_id, branch_code))
             if amenity_ids:
                 cur.executemany(
-                    "INSERT INTO room_amenities (room_id, amenity_id) VALUES (%s, %s);",
-                    [(result_id, aid) for aid in amenity_ids],
+                    "INSERT INTO room_amenities (branch_code, room_id, amenity_id) VALUES (%s, %s, %s);",
+                    [(branch_code, result_id, aid) for aid in amenity_ids],
                 )
 
         conn.commit()

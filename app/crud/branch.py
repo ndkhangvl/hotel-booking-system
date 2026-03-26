@@ -2,17 +2,72 @@ from app.db.cockroach import get_connection
 from app.schema.branch import BranchCreate, BranchUpdate
 from uuid import UUID
 from psycopg.rows import dict_row
+import unicodedata
+import re
+
+
+def _remove_accents(text: str) -> str:
+    """Bỏ dấu tiếng Việt, trả về chuỗi ASCII."""
+    # Xử lý riêng chữ đ/Đ (không có dạng decomposed chuẩn)
+    text = text.replace('đ', 'd').replace('Đ', 'D')
+    # NFD decompose: tách dấu ra khỏi ký tự → loại combining marks
+    nfkd = unicodedata.normalize("NFD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def generate_branch_code(name: str) -> str:
+    """
+    Sinh branch_code tự động từ tên chi nhánh.
+    - Bỏ tiền tố "Aurora" (không phân biệt hoa thường).
+    - Lấy chữ cái đầu tiên của mỗi từ còn lại, bỏ dấu, viết hoa.
+    - Nếu trùng với branch_code đã có trong DB thì thêm số 2, 3, ...
+    VD: "Aurora Hồ Đông" → "HD"; nếu đã có "HD" → "HD2".
+    """
+    # 1. Bỏ tiền tố Aurora (case-insensitive)
+    cleaned = re.sub(r'^aurora\s*', '', name.strip(), flags=re.IGNORECASE)
+
+    # 2. Lấy chữ đầu mỗi từ, bỏ dấu, viết hoa
+    words = cleaned.split()
+    if not words:
+        # Trường hợp tên chỉ là "Aurora" – dùng AUR
+        base_code = "AUR"
+    else:
+        initials = "".join(w[0] for w in words if w)
+        base_code = _remove_accents(initials).upper()
+        # Loại bỏ ký tự không phải chữ cái
+        base_code = re.sub(r'[^A-Z]', '', base_code) or "BR"
+
+    # 3. Kiểm tra trùng trong DB, thêm số nếu cần
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT branch_code FROM branches WHERE branch_code LIKE %s;",
+                (base_code + '%',)
+            )
+            existing = {row[0] for row in cur.fetchall()}
+
+    if base_code not in existing:
+        return base_code
+
+    counter = 2
+    while f"{base_code}{counter}" in existing:
+        counter += 1
+    return f"{base_code}{counter}"
 
 def create_branch(branch):
     with get_connection() as conn:
         # THÊM row_factory=dict_row để trả về Dict ngay lập tức
         with conn.cursor(row_factory=dict_row) as cur:
             data = branch.model_dump() if hasattr(branch, 'model_dump') else branch.__dict__
+
+            # Tự động sinh branch_code từ tên chi nhánh
+            branch_code = generate_branch_code(data.get('name', ''))
+
             cur.execute("""
-                INSERT INTO branches (name, address, phone, created_user)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO branches (branch_code, name, address, phone, created_user)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING *;
-            """, (data.get('name'), data.get('address'), data.get('phone'), data.get('created_user')))
+            """, (branch_code, data.get('name'), data.get('address'), data.get('phone'), data.get('created_user')))
             return cur.fetchone()
 
 def get_branch_by_id(branch_code: UUID, active_only: bool = False):
