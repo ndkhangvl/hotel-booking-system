@@ -179,6 +179,45 @@ def _resolve_booking_room(cur, branch_code: str | None, room_id: str | None, bra
     raise ValueError("Booking phải có room_id hoặc branch_room_id")
 
 
+def _check_room_conflict(cur, branch_room_id: str, from_date, to_date) -> None:
+    """
+    Kiểm tra xem phòng có booking nào hoạt động trong khoảng thời gian đó không.
+    Nếu có trùng lịch, raise ValueError.
+    
+    Logic kiểm tra:
+    - Booking mới: from_date -> to_date
+    - Booking cũ: old_from_date -> old_to_date
+    - Trùng lịch nếu: from_date < old_to_date AND to_date > old_from_date
+    """
+    cur.execute(
+        """
+        SELECT 
+            booking_id::text,
+            booking_code,
+            customer_name,
+            from_date,
+            to_date,
+            status
+        FROM bookings
+        WHERE branch_room_id = %s
+          AND del_flg = 0
+          AND status != %s
+          AND from_date < %s
+          AND to_date > %s
+        LIMIT 1;
+        """,
+        (branch_room_id, BookingStatus.CANCELLED.value, to_date, from_date)
+    )
+    
+    conflict_booking = cur.fetchone()
+    if conflict_booking:
+        raise ValueError(
+            f"Phòng đã bị đặt từ ngày {conflict_booking['from_date']} đến {conflict_booking['to_date']} "
+            f"(Booking {conflict_booking['booking_code']} - {conflict_booking['customer_name']}). "
+            f"Vui lòng chọn ngày khác"
+        )
+
+
 def create_booking(booking: BookingCreate | BookingAdminCreate, total_price: float = 0.0, current_user_id: str = None):
     nights = (booking.to_date - booking.from_date).days
     if nights <= 0:
@@ -192,6 +231,9 @@ def create_booking(booking: BookingCreate | BookingAdminCreate, total_price: flo
                 str(booking.room_id) if booking.room_id else None,
                 str(booking.branch_room_id) if booking.branch_room_id else None,
             )
+
+            # Kiểm tra xem phòng có bị trùng lịch hay không
+            _check_room_conflict(cur, resolved_branch_room_id, booking.from_date, booking.to_date)
 
             total_price = nightly_price * nights
             now = datetime.now()
@@ -403,6 +445,45 @@ def update_booking_by_admin(booking_id: str, booking_update: BookingAdminUpdate,
                 return None
 
             requested_payment_status = _normalize_payment_status(update_data.pop("payment_status", None)) if "payment_status" in update_data else None
+
+            # Kiểm tra trùng lịch nếu có thay đổi ngày
+            if "from_date" in update_data or "to_date" in update_data:
+                from_date = update_data.get("from_date", current_booking["from_date"])
+                to_date = update_data.get("to_date", current_booking["to_date"])
+                
+                # Kiểm tra logic ngày
+                nights = (to_date - from_date).days
+                if nights <= 0:
+                    raise ValueError("Ngày trả phòng phải sau ngày nhận phòng")
+                
+                # Kiểm tra trùng lịch (exclude booking hiện tại)
+                cur.execute(
+                    """
+                    SELECT 
+                        booking_id::text,
+                        booking_code,
+                        customer_name,
+                        from_date,
+                        to_date,
+                        status
+                    FROM bookings
+                    WHERE branch_room_id = %s
+                      AND booking_id != %s
+                      AND del_flg = 0
+                      AND status != %s
+                      AND from_date < %s
+                      AND to_date > %s
+                    LIMIT 1;
+                    """,
+                    (current_booking["branch_room_id"], booking_id, BookingStatus.CANCELLED.value, to_date, from_date)
+                )
+                conflict_booking = cur.fetchone()
+                if conflict_booking:
+                    raise ValueError(
+                        f"Phòng đã bị đặt từ ngày {conflict_booking['from_date']} đến {conflict_booking['to_date']} "
+                        f"(Booking {conflict_booking['booking_code']} - {conflict_booking['customer_name']}). "
+                        f"Vui lòng chọn ngày khác"
+                    )
 
             if "status" in update_data:
                 update_data["status"] = _normalize_booking_status(update_data["status"])

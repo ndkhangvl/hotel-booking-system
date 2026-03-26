@@ -100,6 +100,30 @@ async def rooms_for_user(
         raise HTTPException(status_code=500, detail=f"Lỗi lấy danh sách phòng: {e}")
 
 
+@routerForUser.get("/available-rooms", response_model=List[dict])
+async def check_available_rooms(
+    branch_code: str = Query(..., description="Code của chi nhánh"),
+    from_date: date = Query(..., description="Ngày nhận phòng"),
+    to_date: date = Query(..., description="Ngày trả phòng"),
+    room_type_id: str | None = Query(None, description="ID loại phòng (tùy chọn)"),
+):
+    """
+    Kiểm tra phòng nào có sẵn trong khoảng thời gian từ from_date đến to_date.
+    Trả về danh sách các phòng có sẵn với thông tin: room_id, branch_room_id, room_number, room_type_name, price, people_number
+    """
+    try:
+        if to_date <= from_date:
+            raise HTTPException(status_code=400, detail="Ngày trả phòng phải sau ngày nhận phòng")
+        
+        available = crud_room.check_available_rooms(branch_code, room_type_id, from_date, to_date)
+        return available
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi kiểm tra phòng trống: {e}")
+
+
+
 @routerAmenities.get("/room-types", response_model=List[RoomTypeResponse])
 async def room_types_for_user(
     limit: int = Query(default=4, ge=1, le=20, description="Số loại phòng cần lấy"),
