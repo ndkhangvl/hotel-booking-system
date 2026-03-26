@@ -509,3 +509,54 @@ def get_room_detail(room_id: str, active_only: bool = False) -> dict:
             room["amenities"] = cur.fetchall()
 
     return room
+
+
+def check_available_rooms(branch_code: str, room_type_id: str | None, from_date: date, to_date: date) -> list:
+    """
+    Kiểm tra phòng nào có sẵn trong khoảng thời gian from_date -> to_date.
+    
+    Trả về danh sách các phòng có sẵn với thông tin:
+    - room_id, branch_room_id, room_number, room_type_name, price, people_number
+    
+    Logic: Phòng có sẵn nếu không có booking (status != 'Cancelled') 
+           trong khoảng from_date < to_date_booking AND to_date > from_date_booking
+    """
+    with get_connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            query = """
+                SELECT DISTINCT
+                    br.branch_room_id::text AS branch_room_id,
+                    br.room_id::text AS room_id,
+                    br.room_number,
+                    rt.name AS room_type_name,
+                    r.price,
+                    r.people_number
+                FROM branch_rooms br
+                JOIN rooms r ON r.room_id = br.room_id
+                LEFT JOIN room_types rt ON rt.room_type_id = r.room_type_id
+                WHERE br.branch_code = %s
+                  AND br.del_flg = 0
+                  AND r.del_flg = 0
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM bookings b
+                    WHERE b.branch_room_id = br.branch_room_id
+                      AND b.del_flg = 0
+                      AND b.status != %s
+                      AND b.from_date < %s
+                      AND b.to_date > %s
+                  )
+            """
+            
+            params = [branch_code, 'Cancelled', to_date, from_date]
+            
+            if room_type_id:
+                query += " AND r.room_type_id = %s"
+                params.append(room_type_id)
+            
+            query += " ORDER BY br.room_number;"
+            
+            cur.execute(query, params)
+            availables = cur.fetchall()
+
+    return [dict(room) for room in availables]
