@@ -62,6 +62,7 @@ async def seed_sample_room_to_mongo():
     await insert_sample_room_data()
 
 app.include_router(user.router)
+app.include_router(user.adminRouter)
 app.include_router(booking.router)
 app.include_router(branch.router)
 app.include_router(branch.routerForUser)

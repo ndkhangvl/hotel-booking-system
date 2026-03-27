@@ -1,4 +1,5 @@
 from datetime import date
+from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from typing import List
 from app.schema.room import RoomInitializeResponse, RoomListResponse, RoomTypeResponse, AmenityResponse, RoomUpsertRequest, RoomResponse, BranchRoomListResponse, BranchRoomUpsertRequest, BranchRoomDeleteRequest
@@ -230,17 +231,17 @@ async def user_get_active_rooms_by_branch(
     return crud_room.get_rooms_by_branch(branch_code, page, page_size, active_only=True)
 
 @router.get("/{room_id}")
-async def admin_get_room_info(room_id: str):
+async def admin_get_room_info(room_id: UUID):
     """[ADMIN] Lấy thông tin chi tiết phòng (kể cả phòng đã xóa)"""
-    room = crud_room.get_room_detail(room_id, active_only=False)
+    room = crud_room.get_room_detail(str(room_id), active_only=False)
     if not room:
         raise HTTPException(status_code=404, detail="Không tìm thấy phòng")
     return room
 
 @routerForUser.get("/{room_id}")
-async def user_get_room_info(room_id: str):
+async def user_get_room_info(room_id: UUID):
     """[USER] Lấy thông tin phòng (chỉ phòng đang hoạt động)"""
-    room = crud_room.get_room_detail(room_id, active_only=True)
+    room = crud_room.get_room_detail(str(room_id), active_only=True)
     if not room:
         raise HTTPException(status_code=404, detail="Phòng không tồn tại hoặc đã ngừng hoạt động")
     return room

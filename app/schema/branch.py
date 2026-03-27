@@ -17,7 +17,7 @@ class BranchUpdate(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
-    created_user: Optional[UUID] = None # <--- Phải có cái này!
+    created_user: Optional[UUID] = None
     del_flg: int
 
 class BranchResponse(BranchBase):

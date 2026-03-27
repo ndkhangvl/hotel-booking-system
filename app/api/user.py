@@ -1,12 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends, status, Query
-from typing import List
+from typing import List, Optional
 from fastapi.security import OAuth2PasswordBearer
 from app.schema.user import UserCreate, UserUpdate, UserResponse, UserLogin, Token, UserPaginationResponse
 from app.crud import user as crud_user
 from app.core import security 
 from app.crud.audit import log_audit_event, log_audit_events_bulk
+import random
 
 router = APIRouter(prefix="/users", tags=["Users"])
+adminRouter = APIRouter(prefix="/admin/users", tags=["Admin - Users"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
@@ -133,3 +135,28 @@ async def register_bulk(users_in: List[UserCreate]):
         return new_users
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Lỗi đăng ký bulk users: {str(e)}")
+
+
+@adminRouter.get("/users-list")
+async def admin_list_users(
+    page: int = Query(1, ge=1, description="Số trang"),
+    page_size: int = Query(10000, ge=1, le=10000, description="Số user mỗi trang"),
+    random_sample: Optional[int] = Query(None, ge=1, le=10000, description="Lấy ngẫu nhiên N users từ kết quả"),
+):
+    """
+    [ADMIN - NO AUTH] Lấy danh sách users.
+    - Dùng `random_sample=2000` để lấy ngẫu nhiên 2000 users.
+    - Dùng cho automation scripts (không yêu cầu token).
+    """
+    result = crud_user.get_all_users(page=page, page_size=page_size)
+    items = result.get("items", [])
+
+    if random_sample and len(items) > random_sample:
+        items = random.sample(items, random_sample)
+
+    return {
+        "items": items,
+        "total": len(items),
+        "page": page,
+        "page_size": page_size,
+    }

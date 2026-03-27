@@ -254,8 +254,7 @@ def create_all_tables():
             updated_date DATE,
             updated_time TIME,
             updated_user UUID,
-            del_flg SMALLINT DEFAULT 0,
-            room_id UUID
+            del_flg SMALLINT DEFAULT 0
         );
         """),
 

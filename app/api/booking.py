@@ -19,7 +19,7 @@ routerAdmin = APIRouter(prefix="/Admin/bookings", tags=["Admin - Bookings"])
 async def create_new_booking(booking: BookingCreate):
     try:
         created_booking = crud_booking.create_booking(booking)
-        # await enqueue_booking_confirmation_email(created_booking)
+        await enqueue_booking_confirmation_email(created_booking)
         
         await log_audit_event(
             action="CREATE",
@@ -84,7 +84,7 @@ async def read_bookings_for_admin(
 async def create_booking_admin(booking: BookingAdminCreate):
     try:
         created_booking = crud_booking.create_booking(booking)
-        # await enqueue_booking_confirmation_email(created_booking)
+        await enqueue_booking_confirmation_email(created_booking)
 
         await log_audit_event(
             action="CREATE",
